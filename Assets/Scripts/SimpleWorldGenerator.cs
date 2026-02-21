@@ -217,6 +217,10 @@ namespace WormCrawlerPrototype
 
         [SerializeField] private float terrainBottomY = -12f;
         [SerializeField] private int terrainSmoothIterations = 3;
+        [SerializeField] private int terrainCellularSmoothIterations = 3;
+        [SerializeField] private int terrainMinIslandCells = 200;
+        [SerializeField] private int terrainMinHoleCells = 120;
+        [SerializeField] private int terrainMinLoopAreaCells = 300;
 
         private Sprite _heroSprite;
 

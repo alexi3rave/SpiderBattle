@@ -1,11 +1,11 @@
 # WormCrawlerPrototype
 
-Прототип 2D-песочницы в духе **Worms**: процедурный уровень, полигональная физика земли, крюк-кошка с верёвкой (DistanceJoint2D) и камерой с режимом free-look.
+Прототип 2D-песочницы в духе **Worms**: уровень из PNG-карты, полигональная физика земли, крюк-кошка с верёвкой (DistanceJoint2D) и камерой с режимом free-look.
 
-Проект сделан так, чтобы **визуальные тайлы** и **физика** были разделены:
+Проект сделан так, чтобы **визуал** и **физика** были разделены:
 
-- Визуал: `Tilemap` (`Foreground`/`Background`).
-- Физика: **только** `PolygonCollider2D` у объектов `GroundPoly` и `Islands`.
+- Визуал: спрайт из PNG-текстуры террейна.
+- Физика: **только** `EdgeCollider2D` у объекта `GroundPoly`.
 
 ---
 
@@ -40,7 +40,6 @@
   - Rope: `Assets/Scripts/GrappleController.cs`
   - Grenade: `Assets/Scripts/HeroGrenadeThrower.cs`, `Assets/Scripts/GrenadeProjectile.cs`
   - ClawGun: `Assets/Scripts/HeroClawGun.cs`
-  - AutoGun: `Assets/Scripts/HeroAutoGun.cs`
   - Teleport: `Assets/Scripts/HeroTeleport.cs`
   - Переключение оружия + HUD: `Assets/Scripts/HeroAmmoCarousel.cs`
 - **AI**: `Assets/Scripts/AI/SpiderBotController.cs`
@@ -68,7 +67,7 @@
 - **`TurnManager`** (`Assets/Scripts/TurnManager.cs`)
   - **Роль**: выбор активного героя, строгая альтернация команд, ограничения оружия (locked/shotUsed/ropeOnly), таймер хода, damage-reaction.
   - **Ключевые типы**:
-    - `TurnWeapon` (`None`, `Grenade`, `ClawGun`, `AutoGun`, `Teleport`).
+    - `TurnWeapon` (`None`, `Grenade`, `ClawGun`, `Teleport`).
   - **Ключевые свойства**:
     - `ActivePlayer` — текущий герой.
     - `LockedWeaponThisTurn`, `ShotUsedThisTurn`, `RopeOnlyThisTurn` — состояние ограничений хода.
@@ -76,7 +75,7 @@
     - `CanSelectWeapon(TurnWeapon weapon)` — можно ли выбрать оружие сейчас.
     - `TryConsumeShot(TurnWeapon weapon)` — отмечает действие как совершённое (clamp таймера, lock оружия).
     - `NotifyWeaponSelected(TurnWeapon weapon)` — фиксация выбора оружия (lock).
-    - `NotifyClawGunReleased()` / `NotifyAutoGunReleased()` — перевод хода в rope-only в конце удержания очереди.
+    - `NotifyClawGunReleased()` — перевод хода в rope-only в конце удержания очереди.
     - `EndTurnAfterAttack()` — завершить ход после атаки.
   - **Инварианты/правила**:
     - После действия (выстрел/урон) оставшееся время может быть зажато до `postActionClampSeconds`.
@@ -133,9 +132,6 @@
   - **Баланс/параметры**:
     - `shotsPerSecond` (обычно 2/s), `maxShots/shotsLeft` (обычно 40), дальность масштабируется от гранаты.
 
-- **`HeroAutoGun`** (`Assets/Scripts/HeroAutoGun.cs`)
-  - **Роль**: автоматическое оружие (не ClawGun) с удержанием.
-
 - **`HeroTeleport`** (`Assets/Scripts/HeroTeleport.cs`)
   - **Роль**: телепорт героя в выбранную точку карты (предмет Teleport).
 
@@ -149,10 +145,14 @@
 ### 0.5.7 Мир / генерация / разрушаемость
 
 - **`SimpleWorldGenerator`** (`Assets/Scripts/SimpleWorldGenerator.cs`)
-  - **Роль**: генерация мира, тайлы как визуал, полигоны как физика, карвинг кратеров.
+  - **Роль**: загрузка мира из PNG-текстуры, построение `EdgeCollider2D` по контурам, карвинг кратеров в рантайме.
+  - **Ключевые методы**:
+    - `Generate(int seed)` — загружает PNG, строит коллайдеры, спавнит героя.
+    - `CarveCraterWorld(Vector2 center, float radius)` — вырезает кратер в террейне.
+    - `ConfigurePngTerrain(string path)` — задаёт путь к PNG-ресурсу.
 
 - **`WorldDecoration`** (`Assets/Scripts/WorldDecoration.cs`)
-  - **Роль**: декоративные/вспомогательные элементы мира.
+  - **Роль**: компонент-маркер на префабах декораций (размер, допустимый наклон, вертикальный offset). Используется при размещении entity из PNG entities-карты.
 
 ---
 
@@ -160,7 +160,7 @@
 
 - Открой сцену и нажми Play.
 - `GameManager` создаётся автоматически через `Bootstrap`.
-- Уровень генерируется при старте, и каждый рестарт генерирует новый вариант (с подбором seed до валидного пути).
+- Уровень загружается из PNG-текстуры при старте.
 
 ---
 
@@ -285,64 +285,32 @@
 
 ---
 
-## 5) Процедурная генерация (LevelGenerator)
+## 5) Генерация мира из PNG
 
-Генерация состоит из нескольких этапов.
+Мир загружается из PNG-текстуры (`Resources/Levels/terrain`).
 
-### 5.1 Профиль земли (ground[])
+### 5.1 Загрузка террейна
 
-- Размер мира: `WidthTiles` × `HeightTiles`.
-- Есть `waterLine` (низ мира) — ниже него мир считается «дном/водой».
-- Максимальная высота поверхности ограничена примерно **1/3 высоты мира**:
-  - `terrainMaxY ≈ height * 0.33`.
+- PNG-текстура интерпретируется попиксельно: непрозрачные пиксели → solid, прозрачные → воздух.
+- Порог прозрачности настраивается через `pngAlphaSolidThreshold`.
+- Размер мира определяется размером PNG и `pngPixelsPerUnit`.
 
-Профиль создаётся через Perlin noise + модификации:
+### 5.2 Построение коллайдеров
 
-- Базовая высота `baseY`.
-- «Ямы» (pit) через `pitCooldown`, периодически опускают землю на несколько тайлов.
-- Сглаживание профиля `SmoothGroundProfile(ground)`.
+- Из bitmap solid-маски строятся контурные петли (`BuildBoundaryLoops`).
+- Петли упрощаются (`SimplifyLoop`) и сглаживаются (`ApplyChaikinSmoothing`).
+- Каждая петля становится `EdgeCollider2D` на объекте `GroundPoly`.
 
-### 5.2 Вертикальные ступени (почти-стены)
+### 5.3 Entities из PNG
 
-Чтобы получить более разнообразную геометрию и «зацепы»:
+- Опциональная вторая PNG (`Resources/Levels/entities`) задаёт позиции объектов по цвету пикселей.
+- Цвет `pngHeroColor` (по умолчанию magenta) задаёт точку спавна героя.
+- Другие цвета могут быть привязаны к `WorldDecoration` префабам через `pngEntitySpawns`.
 
-- Выбирается часть колонок как `verticalSteps` (целевая доля около 30%).
-- В этих местах создаётся резкий перепад высоты между `ground[x]` и `ground[x+1]`.
-- В остальных местах перепад ограничивается до `[-1..+1]` тайла, чтобы были наклонные участки.
+### 5.4 Карвинг кратеров (runtime)
 
-### 5.3 Полигон поверхности
-
-`view.SetGroundPolygon(ground, bottomY, verticalSteps)`:
-
-- Строит mesh + `PolygonCollider2D` поверхности.
-- Делает наклонные участки (где перепад высоты не вертикальный), а не «ступеньки из тайлов».
-
-### 5.4 Острова (Islands) и полки в ямах
-
-Острова нужны, чтобы:
-
-- был «воздух» и площадки для зацепа в средней части мира,
-- игрок мог выбраться из глубоких ям.
-
-Создаются прямоугольные острова в «средней трети» по высоте:
-
-- `midMinY ~ terrainMaxY + 4`
-- `midMaxY ~ height * 0.66`
-- Каждый слот с шансом ~40% создаёт остров.
-
-Полки в ямах:
-
-- Для больших вертикальных перепадов (`abs(dh) >= 3`) генерируется полка со стороны ямы.
-- Полка добавляется как отдельный остров/коллайдер и как несколько solid-тайлов.
-
-### 5.5 Валидация пути
-
-Генератор считает уровень валидным, если есть путь от spawn к exit:
-
-- Находит ближайшие «стоячие» клетки (не solid, но под ними solid).
-- Запускает поиск `HasPath(...)`.
-
-В `HasPath` учитывается ограничение, связанное с верёвкой (`ropeMaxDist`), чтобы не генерировать уровни, которые принципиально нельзя пройти.
+- `CarveCraterWorld(center, radius)` вырезает круг из solid-маски.
+- Обновляет текстуру и перестраивает `EdgeCollider2D` в реальном времени.
 
 ---
 
@@ -589,9 +557,13 @@
 - `bounceMinHeight`, `bounceMaxHeight`, `bounceReferenceFall` — настройка bounce.
 - `ropeBounceTangentFactor` — насколько bounce усиливает свинг.
 
-### 11.4 Генерация (`GameManager`, `LevelGenerator`)
+### 11.4 Генерация (`SimpleWorldGenerator`)
 
-- `seed`, `theme`, `chunks`, `chunkWidthTiles`, `heightTiles`.
+- `pngTerrainResourcesPath` — путь к PNG террейна в Resources.
+- `pngPixelsPerUnit` — масштаб (пикселей на юнит).
+- `pngAlphaSolidThreshold` — порог прозрачности для solid.
+- `terrainBottomY` — нижняя граница мира.
+- `terrainSmoothIterations` — число итераций сглаживания контуров.
 
 ---
 
@@ -614,7 +586,6 @@
 - Оружие:
   - Grenade: `Assets/Scripts/HeroGrenadeThrower.cs`, `Assets/Scripts/GrenadeProjectile.cs`
   - ClawGun: `Assets/Scripts/HeroClawGun.cs`
-  - AutoGun: `Assets/Scripts/HeroAutoGun.cs`
   - Teleport: `Assets/Scripts/HeroTeleport.cs`
 - AI: `Assets/Scripts/AI/SpiderBotController.cs`
 - Взрывы/FX: `Assets/Scripts/ExplosionController.cs`, `Assets/Scripts/GrenadeExplosionFx.cs`
