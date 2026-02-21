@@ -28,6 +28,7 @@ namespace WormCrawlerPrototype
         private Texture2D _teleportIcon;
         private Texture2D _clawGunSheet;
         private Rect _clawGunFrame0Uv;
+        private Texture2D _borderTex;
 
         private AmmoSlot _selected;
 
@@ -71,6 +72,10 @@ namespace WormCrawlerPrototype
                 _clawGunIcon = GenerateClawGunFallbackIcon();
             }
             ResolveClawGunIcon();
+
+            _borderTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            _borderTex.SetPixel(0, 0, Color.white);
+            _borderTex.Apply(false, true);
 
             ApplySelection();
         }
@@ -280,6 +285,26 @@ namespace WormCrawlerPrototype
             DrawHudIconButton(tpRect, _teleportIcon, AmmoSlot.Teleport);
         }
 
+        private void DrawIconBorder(Rect rect, bool selected, bool canSelect)
+        {
+            if (_borderTex == null) return;
+            var borderW = Mathf.Max(2f, rect.width * 0.04f);
+            var borderColor = selected
+                ? new Color(1f, 1f, 1f, 0.95f)
+                : new Color(0.8f, 0.8f, 0.8f, canSelect ? 0.50f : 0.20f);
+            var prev = GUI.color;
+            GUI.color = borderColor;
+            // top
+            GUI.DrawTexture(new Rect(rect.x, rect.y, rect.width, borderW), _borderTex);
+            // bottom
+            GUI.DrawTexture(new Rect(rect.x, rect.yMax - borderW, rect.width, borderW), _borderTex);
+            // left
+            GUI.DrawTexture(new Rect(rect.x, rect.y, borderW, rect.height), _borderTex);
+            // right
+            GUI.DrawTexture(new Rect(rect.xMax - borderW, rect.y, borderW, rect.height), _borderTex);
+            GUI.color = prev;
+        }
+
         private void DrawHudIconButton(Rect rect, Texture2D tex, AmmoSlot slot)
         {
             var canSelect = CoerceSelection(slot) == slot;
@@ -300,6 +325,8 @@ namespace WormCrawlerPrototype
             {
                 GUI.Label(rect, "?");
             }
+
+            DrawIconBorder(rect, selected, canSelect);
 
             GUI.color = prevColor;
             GUI.enabled = prevEnabled;
@@ -340,18 +367,19 @@ namespace WormCrawlerPrototype
             if (_clawGun != null)
             {
                 var shots = Mathf.Max(0, _clawGun.ShotsLeft);
-                var fontSize = Mathf.Clamp(Mathf.RoundToInt(rect.height * 0.30f), 14, 26);
-                var labelW = Mathf.Max(26f, rect.width * 0.55f);
-                var labelRect = new Rect(rect.xMax + Mathf.Max(4f, rect.width * 0.08f), rect.yMin, labelW, rect.height);
+                var fontSize = Mathf.Clamp(Mathf.RoundToInt(rect.height * 0.28f), 12, 24);
+                var labelH = fontSize * 1.3f;
+                var labelW = rect.width * 0.55f;
+                var labelRect = new Rect(rect.xMax - labelW - 2f, rect.y + 2f, labelW, labelH);
 
                 var style = new GUIStyle(GUI.skin.label);
-                style.alignment = TextAnchor.MiddleLeft;
+                style.alignment = TextAnchor.UpperRight;
                 style.fontStyle = FontStyle.Bold;
                 style.fontSize = fontSize;
 
                 var text = shots.ToString();
-                var shadow = new Color(0f, 0f, 0f, 0.85f);
-                var main = selected ? new Color(1f, 1f, 1f, 1f) : new Color(1f, 1f, 1f, canSelect ? 0.90f : 0.45f);
+                var shadow = new Color(0f, 0f, 0f, 0.90f);
+                var main = selected ? new Color(1f, 1f, 0.3f, 1f) : new Color(1f, 1f, 0.3f, canSelect ? 0.90f : 0.45f);
 
                 var prevColor2 = GUI.color;
                 GUI.color = shadow;
@@ -360,6 +388,8 @@ namespace WormCrawlerPrototype
                 GUI.Label(labelRect, text, style);
                 GUI.color = prevColor2;
             }
+
+            DrawIconBorder(rect, selected, canSelect);
 
             GUI.color = prev;
             GUI.enabled = prevEnabled;
