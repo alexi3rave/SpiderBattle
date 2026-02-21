@@ -134,21 +134,13 @@ namespace WormCrawlerPrototype.AI
         [SerializeField] private float botClawFireDownOffsetDeg = 10f;
 
         [SerializeField] private float ropeAttachWaitSeconds = 0.35f;
-        [SerializeField] private float ropeReelSeconds = 0.65f;
         [SerializeField] private float ropeSwingSeconds = 0.55f;
-        [SerializeField] private float stuckCheckSeconds = 0.45f;
-        [SerializeField] private float stuckMoveDistance = 0.35f;
 
         [SerializeField] private float approachStepSeconds = 0.5f;
-        [SerializeField] private float ropeAngleStepDegrees = 15f;
-        [SerializeField] private float ropeDetachSafeGroundDistance = 2.25f;
         [SerializeField] private float ropeDetachMaxDescendSeconds = 1.75f;
-        [SerializeField] private float ropeFallbackJumpReelSeconds = 5.0f;
         [SerializeField] private float ropeDownFullExtendSeconds = 5.0f;
-        [SerializeField] private float ropeFallbackSwingSeconds = 1.2f;
 
         [SerializeField] private float approachMaxSeconds = 55f;
-        [SerializeField] private float retreatMaxSeconds = 35f;
         [SerializeField] private float retreatAfterAttackSeconds = 7f;
         [SerializeField] private float retreatWalkBurstSeconds = 0.85f;
         [SerializeField] private float safePointSearchRadius = 18f;
@@ -158,11 +150,7 @@ namespace WormCrawlerPrototype.AI
         [SerializeField] private int tunnelEscapeMinFailedRopeDownAttempts = 2;
         [SerializeField] private int tunnelEscapeMaxLegs = 6;
 
-        [SerializeField] private float ropeAimAboveEnemyHeight = 6f;
-
         [SerializeField] private float closeRangeOverrideFactor = 0.5f;
-        [SerializeField] private int walkStepsBeforeRope = 3;
-        [SerializeField] private float maxVerticalRopePhaseSeconds = 2.0f;
         [SerializeField] private float ropePostManeuverRecheckDelay = 0.05f;
         [SerializeField] private bool debugLogs = false;
 

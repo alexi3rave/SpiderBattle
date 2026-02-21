@@ -42,7 +42,6 @@ namespace WormCrawlerPrototype
         [SerializeField] private Vector2 mobileVirtualResolution = new Vector2(1080f, 1920f);
         [SerializeField] private float mobileButtonAlpha = 0.35f;
         [SerializeField] private float mobileButtonAlphaPressed = 0.6f;
-        [SerializeField] private float mobileButtonCornerRadius = 14f;
         [SerializeField] private float menuUiScale = 2.5f;
         [SerializeField] private float menuUiScaleFactor = 0.75f;
         [SerializeField] private float touchFireXOffset = -1000f;
