@@ -163,6 +163,28 @@ namespace WormCrawlerPrototype
             }
         }
 
+        private Texture2D _panelTex;
+        private Texture2D _btnYesTex;
+        private Texture2D _btnNoTex;
+        private float _animTime;
+
+        private void EnsureTeleportTextures()
+        {
+            if (_panelTex != null) return;
+
+            _panelTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            _panelTex.SetPixel(0, 0, new Color(0.08f, 0.06f, 0.18f, 0.92f));
+            _panelTex.Apply(false, true);
+
+            _btnYesTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            _btnYesTex.SetPixel(0, 0, new Color(0.15f, 0.75f, 0.25f, 0.95f));
+            _btnYesTex.Apply(false, true);
+
+            _btnNoTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            _btnNoTex.SetPixel(0, 0, new Color(0.80f, 0.18f, 0.18f, 0.95f));
+            _btnNoTex.Apply(false, true);
+        }
+
         private void OnGUI()
         {
             if (Bootstrap.IsMapMenuOpen)
@@ -171,6 +193,7 @@ namespace WormCrawlerPrototype
             }
             if (!Enabled || !_confirmOpen)
             {
+                _animTime = 0f;
                 return;
             }
             if (usedThisMatch)
@@ -178,32 +201,130 @@ namespace WormCrawlerPrototype
                 return;
             }
 
-            var w = Mathf.Min(520f, Screen.width * 0.9f);
-            var h = 170f;
-            var x = (Screen.width - w) * 0.5f;
-            var y = (Screen.height - h) * 0.35f;
-            var rect = new Rect(x, y, w, h);
+            EnsureTeleportTextures();
+            _animTime += Time.deltaTime;
 
-            GUI.ModalWindow(GetInstanceID(), rect, _ =>
+            var sw = (float)Screen.width;
+            var sh = (float)Screen.height;
+
+            var panelW = Mathf.Min(sw * 0.75f, 460f);
+            var panelH = Mathf.Min(sh * 0.35f, 220f);
+            var panelX = (sw - panelW) * 0.5f;
+            var panelY = (sh - panelH) * 0.38f;
+
+            // Animated entrance: slide + scale.
+            var t = Mathf.Clamp01(_animTime * 4f);
+            var ease = 1f - (1f - t) * (1f - t); // ease-out quad
+            panelY = Mathf.Lerp(panelY - 40f, panelY, ease);
+            var alpha = ease;
+
+            var panelRect = new Rect(panelX, panelY, panelW, panelH);
+
+            var prevColor = GUI.color;
+
+            // Panel background.
+            GUI.color = new Color(1f, 1f, 1f, alpha);
+            if (_panelTex != null)
             {
-                GUILayout.Space(6f);
-                GUILayout.Label("Телепортироваться в случайную точку карты?");
-                GUILayout.Space(10f);
-                GUILayout.Label("Enter/Y = Да, Esc/N = Отмена");
-                GUILayout.FlexibleSpace();
+                GUI.DrawTexture(panelRect, _panelTex);
+            }
 
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("Да", GUILayout.Height(42f)))
-                {
-                    TryTeleportNowInternal(bypassConfirmation: true);
-                }
-                if (GUILayout.Button("Отмена", GUILayout.Height(42f)))
-                {
-                    CancelTeleport();
-                }
-                GUILayout.EndHorizontal();
+            // Panel border (bright, cartoon-style).
+            var borderW = Mathf.Max(3f, panelW * 0.008f);
+            var pulse = 0.85f + 0.15f * Mathf.Sin(_animTime * 3.5f);
+            var borderCol = new Color(0.4f * pulse, 0.7f * pulse, 1f * pulse, alpha * 0.9f);
+            DrawRectBorder(panelRect, borderW, borderCol);
 
-            }, "Teleport");
+            // Title with pulsing glow.
+            var titleFontSize = Mathf.Clamp(Mathf.RoundToInt(panelH * 0.16f), 18, 36);
+            var titleStyle = new GUIStyle(GUI.skin.label);
+            titleStyle.alignment = TextAnchor.MiddleCenter;
+            titleStyle.fontStyle = FontStyle.Bold;
+            titleStyle.fontSize = titleFontSize;
+            titleStyle.wordWrap = true;
+
+            var titleH = titleFontSize * 2.2f;
+            var titleRect = new Rect(panelX + 12f, panelY + panelH * 0.08f, panelW - 24f, titleH);
+
+            // Shadow.
+            GUI.color = new Color(0f, 0f, 0f, alpha * 0.7f);
+            GUI.Label(new Rect(titleRect.x + 2f, titleRect.y + 2f, titleRect.width, titleRect.height),
+                "Телепортируемся\nв случайную точку?", titleStyle);
+
+            // Main text (pulsing white-cyan).
+            var textPulse = 0.9f + 0.1f * Mathf.Sin(_animTime * 2.5f);
+            GUI.color = new Color(textPulse, textPulse, 1f, alpha);
+            GUI.Label(titleRect, "Телепортируемся\nв случайную точку?", titleStyle);
+
+            // Buttons.
+            var btnH = Mathf.Clamp(panelH * 0.28f, 44f, 70f);
+            var btnW = (panelW - 36f) * 0.5f;
+            var btnY = panelY + panelH - btnH - panelH * 0.10f;
+            var btnFontSize = Mathf.Clamp(Mathf.RoundToInt(btnH * 0.42f), 16, 32);
+
+            var yesRect = new Rect(panelX + 12f, btnY, btnW, btnH);
+            var noRect = new Rect(panelX + panelW - 12f - btnW, btnY, btnW, btnH);
+
+            var clickedYes = DrawCartoonButton(yesRect, "Да", _btnYesTex, btnFontSize, alpha);
+            var clickedNo = DrawCartoonButton(noRect, "Нет", _btnNoTex, btnFontSize, alpha);
+
+            GUI.color = prevColor;
+
+            if (clickedYes)
+            {
+                TryTeleportNowInternal(bypassConfirmation: true);
+            }
+            else if (clickedNo)
+            {
+                CancelTeleport();
+            }
+        }
+
+        private bool DrawCartoonButton(Rect rect, string label, Texture2D bgTex, int fontSize, float alpha)
+        {
+            var prevColor = GUI.color;
+
+            // Background.
+            GUI.color = new Color(1f, 1f, 1f, alpha);
+            if (bgTex != null)
+            {
+                GUI.DrawTexture(rect, bgTex);
+            }
+
+            // Border.
+            var bw = Mathf.Max(2f, rect.width * 0.025f);
+            DrawRectBorder(rect, bw, new Color(1f, 1f, 1f, alpha * 0.7f));
+
+            // Label with shadow.
+            var style = new GUIStyle(GUI.skin.label);
+            style.alignment = TextAnchor.MiddleCenter;
+            style.fontStyle = FontStyle.Bold;
+            style.fontSize = fontSize;
+
+            GUI.color = new Color(0f, 0f, 0f, alpha * 0.8f);
+            GUI.Label(new Rect(rect.x + 1f, rect.y + 1f, rect.width, rect.height), label, style);
+
+            GUI.color = new Color(1f, 1f, 1f, alpha);
+            GUI.Label(rect, label, style);
+
+            // Invisible button for click detection.
+            GUI.color = new Color(1f, 1f, 1f, 0f);
+            var clicked = GUI.Button(rect, GUIContent.none, GUIStyle.none);
+
+            GUI.color = prevColor;
+            return clicked;
+        }
+
+        private static void DrawRectBorder(Rect rect, float w, Color col)
+        {
+            var prev = GUI.color;
+            GUI.color = col;
+            var tex = Texture2D.whiteTexture;
+            GUI.DrawTexture(new Rect(rect.x, rect.y, rect.width, w), tex);
+            GUI.DrawTexture(new Rect(rect.x, rect.yMax - w, rect.width, w), tex);
+            GUI.DrawTexture(new Rect(rect.x, rect.y, w, rect.height), tex);
+            GUI.DrawTexture(new Rect(rect.xMax - w, rect.y, w, rect.height), tex);
+            GUI.color = prev;
         }
 
         private void CancelTeleport()
