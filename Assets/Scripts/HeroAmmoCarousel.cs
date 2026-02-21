@@ -15,6 +15,7 @@ namespace WormCrawlerPrototype
         }
 
         [SerializeField] private bool startWithGrenade = false;
+        [SerializeField] private string ropeIconResourcesPath = "Icons/Rope";
         [SerializeField] private string grenadeIconResourcesPath = "Icons/Grenade";
         [SerializeField] private string clawGunIconResourcesPath = "Icons/auto_gun";
         [SerializeField] private string teleportIconResourcesPath = "Icons/Teleport";
@@ -54,7 +55,11 @@ namespace WormCrawlerPrototype
             _selected = startWithGrenade ? AmmoSlot.Grenade : AmmoSlot.Rope;
 
             _grenadeIcon = ResolveIconTexture(grenadeIconResourcesPath);
-            _ropeIcon = GenerateRopeIcon();
+            _ropeIcon = ResolveIconTexture(ropeIconResourcesPath);
+            if (_ropeIcon == null)
+            {
+                _ropeIcon = GenerateRopeIcon();
+            }
             _clawGunIcon = ResolveIconTexture(clawGunIconResourcesPath);
             _teleportIcon = ResolveIconTexture(teleportIconResourcesPath);
             if (_teleportIcon == null)
@@ -173,6 +178,8 @@ namespace WormCrawlerPrototype
 
             if (_grapple != null)
             {
+                _grapple.SetRopeHandVisible(_selected == AmmoSlot.Rope);
+
                 // For AI worms, TurnManager manages grapple input; avoid disabling input here,
                 // because GrappleController detaches when InputEnabled becomes false.
                 if (bot == null)

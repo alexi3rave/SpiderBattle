@@ -87,6 +87,30 @@ namespace WormCrawlerPrototype
         [Header("Wrap")]
         [SerializeField] private float minSegment = 0.05f;
 
+        [Header("Rope In-Hand Sprite")]
+        [SerializeField] private string ropeHandSpriteResourcesPath = "Weapons/rope";
+        [SerializeField] private float ropeHandHeightFraction = 0.25f;
+        [SerializeField] private Vector2 ropeHandOffsetFraction = new Vector2(-0.6f, 0.27f);
+        [SerializeField] private Vector2 ropeHandPivotNormalized = new Vector2(0.5f, 0.2f);
+        [SerializeField] private float ropeHandAimAngleOffsetDeg = 0f;
+        [SerializeField] private bool ropeHandFlipYWhenFacingLeft = true;
+        [SerializeField] private int ropeHandSortingOrderOffset = 25;
+
+        private Transform _ropeHandPivotT;
+        private Transform _ropeHandSpriteT;
+        private SpriteRenderer _ropeHandSr;
+        private Sprite _ropeHandSprite;
+        private bool _ropeHandVisible;
+
+        public void SetRopeHandVisible(bool visible)
+        {
+            _ropeHandVisible = visible;
+            if (_ropeHandPivotT != null)
+            {
+                _ropeHandPivotT.gameObject.SetActive(visible && _state == RopeState.Idle);
+            }
+        }
+
         private enum RopeState
         {
             Idle,
@@ -485,6 +509,127 @@ namespace WormCrawlerPrototype
             return null;
         }
 
+        private void EnsureRopeHandSprite()
+        {
+            if (_ropeHandPivotT != null)
+            {
+                return;
+            }
+
+            // Load sprite from Resources.
+            if (_ropeHandSprite == null && !string.IsNullOrEmpty(ropeHandSpriteResourcesPath))
+            {
+                _ropeHandSprite = Resources.Load<Sprite>(ropeHandSpriteResourcesPath);
+                if (_ropeHandSprite == null)
+                {
+                    var tex = Resources.Load<Texture2D>(ropeHandSpriteResourcesPath);
+                    if (tex != null)
+                    {
+                        _ropeHandSprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height),
+                            ropeHandPivotNormalized, Mathf.Max(1f, tex.height));
+                    }
+                }
+            }
+
+            if (_ropeHandSprite == null)
+            {
+                return;
+            }
+
+            var parent = transform;
+            var visual = transform.Find("Visual");
+            if (visual != null)
+            {
+                var anim = visual.Find("Anim");
+                parent = anim != null ? anim : visual;
+            }
+
+            var pivotGo = new GameObject("RopeHandPivot");
+            pivotGo.transform.SetParent(parent, false);
+            _ropeHandPivotT = pivotGo.transform;
+
+            var spriteGo = new GameObject("RopeHandSprite");
+            spriteGo.transform.SetParent(_ropeHandPivotT, false);
+            _ropeHandSpriteT = spriteGo.transform;
+
+            _ropeHandSr = spriteGo.AddComponent<SpriteRenderer>();
+            _ropeHandSr.sprite = _ropeHandSprite;
+
+            var heroSr = ResolveHeroSpriteRenderer();
+            if (heroSr != null)
+            {
+                _ropeHandSr.sortingLayerID = heroSr.sortingLayerID;
+                _ropeHandSr.sortingOrder = heroSr.sortingOrder + ropeHandSortingOrderOffset;
+            }
+            else
+            {
+                _ropeHandSr.sortingOrder = 140;
+            }
+
+            pivotGo.SetActive(false);
+        }
+
+        private void UpdateRopeHandTransform()
+        {
+            if (_ropeHandPivotT == null || _ropeHandSpriteT == null || _ropeHandSr == null)
+            {
+                return;
+            }
+
+            var shouldShow = _ropeHandVisible && _state == RopeState.Idle;
+            _ropeHandPivotT.gameObject.SetActive(shouldShow);
+            if (!shouldShow)
+            {
+                return;
+            }
+
+            var heroCol = GetComponent<Collider2D>();
+            var heroH = 1f;
+            var heroW = 1f;
+            if (heroCol != null)
+            {
+                var b = heroCol.bounds;
+                heroH = Mathf.Max(0.25f, b.size.y);
+                heroW = Mathf.Max(0.25f, b.size.x);
+            }
+
+            var aimDir = Vector2.right;
+            if (aim != null)
+            {
+                aimDir = aim.AimDirection;
+            }
+
+            var facingSign = 1f;
+            var heroSr = ResolveHeroSpriteRenderer();
+            if (heroSr != null)
+            {
+                facingSign = heroSr.flipX ? -1f : 1f;
+            }
+
+            var baseOffset = new Vector2(ropeHandOffsetFraction.x * heroW * facingSign, ropeHandOffsetFraction.y * heroH);
+            var world = (Vector2)transform.position + baseOffset;
+            _ropeHandPivotT.position = new Vector3(world.x, world.y, 0f);
+
+            var d2 = aimDir.sqrMagnitude > 0.0001f ? aimDir : Vector2.right;
+            var ang = Mathf.Atan2(d2.y, d2.x) * Mathf.Rad2Deg + ropeHandAimAngleOffsetDeg;
+            _ropeHandPivotT.rotation = Quaternion.Euler(0f, 0f, ang);
+
+            if (_ropeHandSr.sprite != null)
+            {
+                var desiredH = Mathf.Max(0.01f, heroH * Mathf.Max(0.01f, ropeHandHeightFraction));
+                var spriteH = _ropeHandSr.sprite.bounds.size.y;
+                var s = spriteH > 0.0001f ? desiredH / spriteH : 1f;
+
+                var dynY = 1f;
+                if (ropeHandFlipYWhenFacingLeft && facingSign < 0f)
+                {
+                    dynY = -1f;
+                }
+
+                _ropeHandSpriteT.localScale = new Vector3(s, s * dynY, 1f);
+            }
+        }
+
         private LineRenderer CreateChildLineRenderer(string name, int sortingOffset, int positionCount, Material materialOverride)
         {
             var go = new GameObject(name);
@@ -731,6 +876,9 @@ namespace WormCrawlerPrototype
                     _state = RopeState.Idle;
                 }
             }
+
+            EnsureRopeHandSprite();
+            UpdateRopeHandTransform();
         }
 
         private void FixedUpdate()
