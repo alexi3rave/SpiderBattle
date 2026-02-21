@@ -57,6 +57,8 @@ namespace WormCrawlerPrototype
         private float _damageReactionEndT;
         [SerializeField] private float damageReactionSeconds = 2.0f;
 
+        private int _lastKnownActiveTeam = -1;
+
         private int _lastBotTurnPlayerInstanceId;
 
         private struct TurnLogEntry
@@ -892,6 +894,12 @@ namespace WormCrawlerPrototype
 
             prev = _turnOrder[prevCursor];
             var prevTeam = GetTeamIndex(prev);
+            if (prevTeam < 0)
+            {
+                // The active hero can be destroyed during damage/fall reaction and become null by the time
+                // we advance the turn. Preserve strict alternation using the last known active team.
+                prevTeam = _lastKnownActiveTeam;
+            }
             var desiredTeam = prevTeam == 0 ? 1 : (prevTeam == 1 ? 0 : -1);
 
             _turnOrderCursor = (prevCursor + 1) % _turnOrder.Count;
@@ -1091,6 +1099,9 @@ namespace WormCrawlerPrototype
             }
             if (ap != null)
             {
+                var apId0 = ap.GetComponent<PlayerIdentity>();
+                _lastKnownActiveTeam = apId0 != null ? apId0.TeamIndex : _lastKnownActiveTeam;
+
                 var ammo = ap.GetComponent<HeroAmmoCarousel>();
                 // Do not reset weapon selection every time ApplyActiveState() runs.
                 // This method is called for many reasons (clamp after action, damage reaction, etc.),
