@@ -87,6 +87,7 @@ namespace WormCrawlerPrototype
         [SerializeField] private int impactOnFrameIndex = 5;
         [SerializeField] private float bulletRange = 25f;
         [SerializeField] private float bulletExplosionRadiusHeroHeights = 0.35f;
+        [SerializeField] private float bulletCraterRadiusHeroHeights = 0.575f;
 
         [SerializeField] private bool scaleRangeFromGrenade = true;
         [SerializeField] private float bulletRangeAsGrenadeRangeMultiplier = 1.5f;
@@ -1115,16 +1116,17 @@ namespace WormCrawlerPrototype
 
             var pos = _pendingImpactPoint;
             var heroH = Mathf.Max(0.25f, _pendingHeroHeight);
-            var radius = Mathf.Max(0.05f, heroH * Mathf.Max(0.01f, bulletExplosionRadiusHeroHeights));
+            var damageRadius = Mathf.Max(0.05f, heroH * Mathf.Max(0.01f, bulletExplosionRadiusHeroHeights));
+            var craterRadius = Mathf.Max(0.05f, heroH * Mathf.Max(0.01f, bulletCraterRadiusHeroHeights));
 
             if (debugLogs)
             {
-                Debug.Log($"[ClawGun] ApplyPendingImpact: pos={pos} radius={radius:0.00} hit={(_pendingImpactCollider != null ? _pendingImpactCollider.name : "(null)")} ({name})");
+                Debug.Log($"[ClawGun] ApplyPendingImpact: pos={pos} dmgR={damageRadius:0.00} craterR={craterRadius:0.00} hit={(_pendingImpactCollider != null ? _pendingImpactCollider.name : "(null)")} ({name})");
             }
 
-            SpawnSmallExplosionFx(pos, radius);
-            ApplyDirectHitDamage(pos, radius);
-            TryCarveSmallCrater(pos, radius);
+            SpawnSmallExplosionFx(pos, damageRadius);
+            ApplyDirectHitDamage(pos, damageRadius);
+            TryCarveSmallCrater(pos, craterRadius);
 
             _pendingHasImpact = false;
         }

@@ -379,7 +379,7 @@ namespace WormCrawlerPrototype.AI
                             RegisterBotShot(myTeam, isClaw: true);
                         }
 
-                        // Keep weapon active briefly so its animation can reach the impact frame.
+                        // Continuous fire with aim tracking for the duration set by difficulty.
                         claw.SetExternalHeld(true);
                         var holdT = Time.time;
                         var holdDur = Mathf.Clamp(botClawHoldSeconds, 0.25f, 10.0f);
@@ -389,7 +389,25 @@ namespace WormCrawlerPrototype.AI
                             {
                                 break;
                             }
-                            yield return new WaitForSeconds(0.12f);
+                            // Re-aim at target every tick.
+                            if (target != null && aim != null)
+                            {
+                                var trackOrigin = aim.AimOriginWorld;
+                                var trackPoint = GetTargetAimPoint(target);
+                                var trackDir = (trackPoint - trackOrigin);
+                                if (trackDir.sqrMagnitude > 0.0001f)
+                                {
+                                    if (TryFindClawAim(target, trackOrigin, trackPoint, effectiveClawRange, botClawFireDownOffsetDeg, out var trackAim))
+                                    {
+                                        aim.SetExternalAimOverride(true, trackAim);
+                                    }
+                                    else
+                                    {
+                                        aim.SetExternalAimOverride(true, trackDir.normalized);
+                                    }
+                                }
+                            }
+                            yield return new WaitForSeconds(0.08f);
                         }
                         claw.SetExternalHeld(false);
 
@@ -569,7 +587,7 @@ namespace WormCrawlerPrototype.AI
                         RegisterBotShot(myTeam, isClaw: true);
                     }
 
-                    // Optional short hold burst when shooting from a rope maneuver.
+                    // Continuous fire with aim tracking from rope maneuver.
                     claw.SetExternalHeld(true);
                     var holdT = Time.time;
                     var holdDur = Mathf.Clamp(botClawHoldSeconds, 0.25f, 10.0f);
@@ -579,7 +597,24 @@ namespace WormCrawlerPrototype.AI
                         {
                             break;
                         }
-                        yield return new WaitForSeconds(0.12f);
+                        if (target != null && aim != null)
+                        {
+                            var trackOrigin = aim.AimOriginWorld;
+                            var trackPoint = GetTargetAimPoint(target);
+                            var trackDir = (trackPoint - trackOrigin);
+                            if (trackDir.sqrMagnitude > 0.0001f)
+                            {
+                                if (TryFindClawAim(target, trackOrigin, trackPoint, effectiveClawRange, botClawFireDownOffsetDeg, out var trackAim))
+                                {
+                                    aim.SetExternalAimOverride(true, trackAim);
+                                }
+                                else
+                                {
+                                    aim.SetExternalAimOverride(true, trackDir.normalized);
+                                }
+                            }
+                        }
+                        yield return new WaitForSeconds(0.08f);
                     }
                     claw.SetExternalHeld(false);
                     claw.Enabled = false;
