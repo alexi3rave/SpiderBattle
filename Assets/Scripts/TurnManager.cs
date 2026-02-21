@@ -408,6 +408,15 @@ namespace WormCrawlerPrototype
             _playersReadyT += Time.deltaTime;
             if (_turnT >= Mathf.Max(1f, turnSeconds))
             {
+                // Grenade fuse/air time must complete on the same active hero.
+                // Do not advance turn on timeout while waiting for grenade explosion.
+                if (_grenadeAwaitingExplosion)
+                {
+                    _turnT = Mathf.Max(0f, turnSeconds - 0.01f);
+                    CheckLoseConditions();
+                    return;
+                }
+
                 var ap = ActivePlayer;
                 if (ap != null)
                 {
