@@ -1592,8 +1592,6 @@ namespace WormCrawlerPrototype
             Debug.Log($"[Stage1] World created in scene='{worldGO.scene.name}' (active='{SceneManager.GetActiveScene().name}')");
             _generator = worldGO.AddComponent<SimpleWorldGenerator>();
 
-            _generator.ConfigureDecorations(false);
-
             var selectedTerrain = string.IsNullOrEmpty(_selectedTerrain)
                 ? PlayerPrefs.GetString(TerrainPngPathPrefKey, string.Empty)
                 : _selectedTerrain;
