@@ -544,24 +544,6 @@ namespace WormCrawlerPrototype
             }
         }
 
-        private bool IsSelfCollider(Collider2D c)
-        {
-            if (_selfColliders == null || c == null)
-            {
-                return false;
-            }
-
-            for (var i = 0; i < _selfColliders.Length; i++)
-            {
-                if (_selfColliders[i] == c)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         private void OnDrawGizmosSelected()
         {
             Vector2 origin;

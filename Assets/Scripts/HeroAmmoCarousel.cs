@@ -304,21 +304,6 @@ namespace WormCrawlerPrototype
             }
         }
 
-        private void DrawHudIcon(Rect rect, Texture2D tex, bool selected)
-        {
-            var prev = GUI.color;
-            GUI.color = selected ? new Color(1f, 1f, 1f, 1f) : new Color(1f, 1f, 1f, 0.45f);
-            if (tex != null)
-            {
-                GUI.DrawTexture(rect, tex, ScaleMode.ScaleToFit, alphaBlend: true);
-            }
-            else
-            {
-                GUI.Label(rect, "?");
-            }
-            GUI.color = prev;
-        }
-
         private void DrawClawGunHudIconButton(Rect rect, AmmoSlot slot)
         {
             var canSelect = CoerceSelection(slot) == slot;

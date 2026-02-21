@@ -407,43 +407,5 @@ namespace WormCrawlerPrototype
             }
         }
 
-        private static void ApplyCraterEdge(EdgeCollider2D edge, Vector2 center, float radius, float depth)
-        {
-            var pts = edge.points;
-            if (pts == null || pts.Length < 2)
-            {
-                return;
-            }
-
-            var t = edge.transform;
-            var r = Mathf.Max(0.01f, radius);
-            var changed = false;
-
-            for (var i = 0; i < pts.Length; i++)
-            {
-                var world = (Vector2)t.TransformPoint(pts[i]);
-                var dx = world.x - center.x;
-                var adx = Mathf.Abs(dx);
-                if (adx > r)
-                {
-                    continue;
-                }
-
-                var u = dx / r;
-                var parab = 1f - (u * u);
-                var y = world.y - depth * parab;
-                if (y < world.y - 0.0001f)
-                {
-                    world.y = y;
-                    pts[i] = (Vector2)t.InverseTransformPoint(world);
-                    changed = true;
-                }
-            }
-
-            if (changed)
-            {
-                edge.points = pts;
-            }
-        }
     }
 }

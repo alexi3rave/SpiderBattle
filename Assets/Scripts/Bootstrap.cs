@@ -453,25 +453,6 @@ namespace WormCrawlerPrototype
             return tex;
         }
 
-        private void WithMobileGuiMatrix(System.Action draw)
-        {
-            var prev = GUI.matrix;
-
-            var vw = Mathf.Max(1f, mobileVirtualResolution.x);
-            var vh = Mathf.Max(1f, mobileVirtualResolution.y);
-            var sx = Screen.width / vw;
-            var sy = Screen.height / vh;
-            var s = Mathf.Min(sx, sy);
-
-            var ox = (Screen.width - vw * s) * 0.5f;
-            var oy = (Screen.height - vh * s) * 0.5f;
-            GUI.matrix = Matrix4x4.TRS(new Vector3(ox, oy, 0f), Quaternion.identity, new Vector3(s, s, 1f));
-
-            draw?.Invoke();
-
-            GUI.matrix = prev;
-        }
-
         private void DrawMobileTouchControls()
         {
             if (Bootstrap.IsMapMenuOpen)
@@ -551,23 +532,6 @@ namespace WormCrawlerPrototype
             var pressedDown = DrawRoundMobileButton(downRect, "↓", keyDown, repeat: true);
 
             ApplyMobileInputs(ap, pressedLeft || keyLeft, pressedRight || keyRight, pressedUp || keyUp, pressedDown || keyDown, pressedFire || keyFire);
-        }
-
-        private bool DrawMobileButton(Rect r, string label, bool keyboardPressed, bool repeat)
-        {
-            var colPrev = GUI.color;
-            GUI.color = new Color(1f, 1f, 1f, mobileButtonAlpha);
-
-            var pressedNow = repeat ? GUI.RepeatButton(r, label, _mobileButtonStyle) : GUI.Button(r, label, _mobileButtonStyle);
-            var isPressed = keyboardPressed || pressedNow;
-            if (isPressed)
-            {
-                GUI.color = new Color(1f, 1f, 1f, mobileButtonAlphaPressed);
-                GUI.Box(r, label, _mobileButtonPressedStyle);
-            }
-
-            GUI.color = colPrev;
-            return pressedNow;
         }
 
         private bool DrawRoundMobileButton(Rect r, string label, bool keyboardPressed, bool repeat, Texture2D ringTex = null)
@@ -726,18 +690,6 @@ namespace WormCrawlerPrototype
             }
 
             _mobileFireWasPressed = fire;
-        }
-
-        private void OpenMapMenu(Scene scene)
-        {
-            _pendingScene = scene;
-            _hasPendingScene = true;
-
-            RefreshMapList();
-            EnsureSelectionValid();
-
-            _showMapMenu = true;
-            IsMapMenuOpen = true;
         }
 
         private void OpenMainMenu(Scene scene)

@@ -78,7 +78,6 @@ namespace WormCrawlerPrototype
         [SerializeField] private float reelSpeed = 9f;
 
         [SerializeField] private float reelInGravityScaleFactor = 0f;
-        [SerializeField] private float reelInTangentDamping = 25f;
 
         [Header("Stiffness")]
         [SerializeField] private float stiffLineDamping = 45f;
@@ -860,23 +859,6 @@ namespace WormCrawlerPrototype
                 var vPerp = Vector2.Dot(v, n);
                 _rb.AddForce(-n * (vPerp * stiffLineDamping), ForceMode2D.Force);
             }
-        }
-
-        private void ApplyReelInLinearDamping()
-        {
-            if (_rb == null) return;
-            if (reelInTangentDamping <= 0f) return;
-
-            var swingAnchor = GetSwingAnchor();
-            var p = GetBodyAnchorWorld();
-            var radial = p - swingAnchor;
-            if (radial.sqrMagnitude < 0.0001f) return;
-
-            var radialN = radial.normalized;
-            var tangent = new Vector2(radialN.y, -radialN.x);
-            var pv = _rb.GetPointVelocity(p);
-            var vt = Vector2.Dot(pv, tangent);
-            _rb.AddForce(-tangent * (vt * reelInTangentDamping), ForceMode2D.Force);
         }
 
         private void ApplyTangentialGravityAssist()

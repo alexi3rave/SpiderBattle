@@ -306,26 +306,6 @@ namespace WormCrawlerPrototype
             return outDir.normalized;
         }
 
-        private Vector2 ClampToFacingHemisphere(Vector2 dir)
-        {
-            var d = dir;
-            if (_facingSign >= 0)
-            {
-                if (d.x < 0f) d.x = 0f;
-            }
-            else
-            {
-                if (d.x > 0f) d.x = 0f;
-            }
-
-            if (d.sqrMagnitude < 0.0001f)
-            {
-                return _facingSign >= 0 ? Vector2.right : Vector2.left;
-            }
-
-            return d.normalized;
-        }
-
         private Vector2 GetAimOriginWorld()
         {
             var col = GetComponent<Collider2D>();
