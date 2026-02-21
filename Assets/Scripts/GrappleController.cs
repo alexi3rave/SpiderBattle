@@ -91,7 +91,7 @@ namespace WormCrawlerPrototype
         [SerializeField] private string ropeHandSpriteResourcesPath = "Weapons/rope";
         [SerializeField] private float ropeHandHeightFraction = 0.125f;
         [SerializeField] private bool ropeHandBaseMirrorY = true;
-        [SerializeField] private Vector2 ropeHandOffsetFraction = new Vector2(0f, -0.15f);
+        [SerializeField] private Vector2 ropeHandOffsetFraction = new Vector2(0.06f, -0.09f);
         [SerializeField] private Vector2 ropeHandPivotNormalized = new Vector2(0.5f, 0.5f);
         [SerializeField] private float ropeHandAimAngleOffsetDeg = 0f;
         [SerializeField] private bool ropeHandFollowAim = false;

@@ -1166,6 +1166,8 @@ namespace WormCrawlerPrototype.AI
             var safe = FindBestSafePoint(myTeam);
             if (!safe.HasValue)
             {
+                // Even without a safe point, wait a minimum so the turn is visually noticeable.
+                yield return new WaitForSeconds(1.5f);
                 yield break;
             }
 
