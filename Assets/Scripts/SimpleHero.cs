@@ -7,6 +7,8 @@ namespace WormCrawlerPrototype
     [RequireComponent(typeof(Rigidbody2D))]
     public sealed class SimpleHero : MonoBehaviour
     {
+        public static bool EnableHeroDebugLogs = false;
+
         [SerializeField] private float walkSpeed = 6f;
         [SerializeField] private float accel = 20f;
         [SerializeField] private bool useCurvedSurfaceTangent = true;
@@ -88,14 +90,17 @@ namespace WormCrawlerPrototype
             }
             _aim = GetComponent<WormAimController>();
 
-            Debug.Log($"[Hero] SimpleHero active on '{name}'. animator={(animator != null)} controller={(animator != null && animator.runtimeAnimatorController != null)} spriteRenderer={(spriteRenderer != null)} rb={(_rb != null)} col={(_col != null)}");
-            if (_rb != null)
+            if (EnableHeroDebugLogs)
             {
-                Debug.Log($"[Hero] RB init: bodyType={_rb.bodyType} simulated={_rb.simulated} constraints={_rb.constraints} gravityScale={_rb.gravityScale} freezeRotation={_rb.freezeRotation}");
-            }
-            if (_col != null)
-            {
-                Debug.Log($"[Hero] COL init: size={_col.size} offset={_col.offset}");
+                Debug.Log($"[Hero] SimpleHero active on '{name}'. animator={(animator != null)} controller={(animator != null && animator.runtimeAnimatorController != null)} spriteRenderer={(spriteRenderer != null)} rb={(_rb != null)} col={(_col != null)}");
+                if (_rb != null)
+                {
+                    Debug.Log($"[Hero] RB init: bodyType={_rb.bodyType} simulated={_rb.simulated} constraints={_rb.constraints} gravityScale={_rb.gravityScale} freezeRotation={_rb.freezeRotation}");
+                }
+                if (_col != null)
+                {
+                    Debug.Log($"[Hero] COL init: size={_col.size} offset={_col.offset}");
+                }
             }
 
             var mat = GetNoFrictionMaterial();
@@ -109,7 +114,8 @@ namespace WormCrawlerPrototype
                     }
                 }
             }
-            _debugFixedFrames = 8;
+
+            _debugFixedFrames = EnableHeroDebugLogs ? 8 : 0;
 
             _move = new InputAction("Move", InputActionType.Value);
             _move.AddCompositeBinding("1DAxis")
@@ -217,7 +223,7 @@ namespace WormCrawlerPrototype
 
                 var hit = GetGroundHit(origin, scaledRayLength);
                 var isGrounded = hit.collider != null;
-                if (_debugFixedFrames > 0)
+                if (EnableHeroDebugLogs && _debugFixedFrames > 0)
                 {
                     _debugFixedFrames--;
                     var v = GetVelocity();

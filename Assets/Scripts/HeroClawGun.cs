@@ -281,6 +281,12 @@ namespace WormCrawlerPrototype
         public void ForceStop()
         {
             _held = false;
+            _keyboardHoldActive = false;
+            _mouseHoldActive = false;
+            _externalHoldActive = false;
+            _prevAnyHold = false;
+            _firedSincePress = false;
+            _disableAfterShot = false;
             Enabled = false;
             _animActive = false;
             _impactApplied = false;
@@ -369,6 +375,10 @@ namespace WormCrawlerPrototype
                 if (_weaponPivotT != null) _weaponPivotT.gameObject.SetActive(false);
                 if (_aimLine != null) _aimLine.enabled = false;
                 _held = false;
+                _keyboardHoldActive = false;
+                _mouseHoldActive = false;
+                _externalHoldActive = false;
+                _prevAnyHold = false;
                 return;
             }
 
@@ -1005,6 +1015,14 @@ namespace WormCrawlerPrototype
                 {
                     _disableAfterShot = false;
                     Enabled = false;
+
+                    // Reset hold state so the next activation can start a fresh burst.
+                    _held = false;
+                    _keyboardHoldActive = false;
+                    _mouseHoldActive = false;
+                    _externalHoldActive = false;
+                    _prevAnyHold = false;
+                    _firedSincePress = false;
 
                     var carousel = GetComponent<HeroAmmoCarousel>();
                     if (carousel != null)
