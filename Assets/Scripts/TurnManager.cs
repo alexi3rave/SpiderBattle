@@ -260,19 +260,6 @@ namespace WormCrawlerPrototype
             ClampRemainingTimeAfterAction();
         }
 
-        public void NotifyAutoGunReleased()
-        {
-            if (_gameEnded)
-            {
-                return;
-            }
-
-            _ropeOnlyThisTurn = true;
-            _turnShotUsed = true;
-
-            ClampRemainingTimeAfterAction();
-        }
-
         private void ClampRemainingTimeAfterAction()
         {
             var total = Mathf.Max(0.01f, turnSeconds);
@@ -396,17 +383,8 @@ namespace WormCrawlerPrototype
                 return;
             }
 
-            // AutoGun is a continuous weapon. While the player is still firing (i.e. AutoGun is locked
-            // and rope-only mode hasn't been activated yet), we must not start a damage reaction.
-            // Damage reaction disables input and forces turn end, which would prematurely stop autofire.
-            if (source == DamageSource.AutoGun && _turnLockedWeapon == TurnWeapon.AutoGun && !_ropeOnlyThisTurn)
-            {
-                return;
-            }
-
             if (source != DamageSource.GrenadeExplosion
                 && source != DamageSource.Fall
-                && source != DamageSource.AutoGun
                 && source != DamageSource.ClawGun
                 && source != DamageSource.HeroDeathExplosion)
             {
@@ -1159,12 +1137,6 @@ namespace WormCrawlerPrototype
             {
                 grenade.enabled = true;
                 grenade.InputEnabled = inputEnabled;
-            }
-
-            var autoGun = hero.GetComponent<HeroAutoGun>();
-            if (autoGun != null)
-            {
-                autoGun.enabled = false;
             }
 
             var claw = hero.GetComponent<HeroClawGun>();

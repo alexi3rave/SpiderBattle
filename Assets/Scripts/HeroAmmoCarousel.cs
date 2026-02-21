@@ -63,7 +63,7 @@ namespace WormCrawlerPrototype
             }
             if (_clawGunIcon == null)
             {
-                _clawGunIcon = GenerateAutoGunIcon();
+                _clawGunIcon = GenerateClawGunFallbackIcon();
             }
             ResolveClawGunIcon();
 
@@ -419,7 +419,7 @@ namespace WormCrawlerPrototype
             return tex;
         }
 
-        private static Texture2D GenerateAutoGunIcon()
+        private static Texture2D GenerateClawGunFallbackIcon()
         {
             var tex = new Texture2D(64, 32, TextureFormat.RGBA32, false);
             tex.filterMode = FilterMode.Point;
