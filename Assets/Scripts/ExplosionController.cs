@@ -1,9 +1,12 @@
+using System;
 using UnityEngine;
 
 namespace WormCrawlerPrototype
 {
     public sealed class ExplosionController : MonoBehaviour
     {
+        public static event Action Exploded;
+
         private static bool s_CarveCraterWarned;
 
         [Header("Timing")]
@@ -125,6 +128,8 @@ namespace WormCrawlerPrototype
                 return;
             }
             _exploded = true;
+
+            Exploded?.Invoke();
 
             var center = (Vector2)transform.position;
             var heroH = _cachedHeroH > 0.0001f ? _cachedHeroH : ResolveHeroHeight();

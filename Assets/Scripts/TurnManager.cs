@@ -52,6 +52,8 @@ namespace WormCrawlerPrototype
         private TurnWeapon _turnLockedWeapon = TurnWeapon.None;
         private bool _turnShotUsed;
         private bool _ropeOnlyThisTurn;
+        private bool _grenadeAwaitingExplosion;
+        private bool _grenadePostExplosionEscapeWindow;
 
         private bool _damageReactionActive;
         private float _damageReactionEndT;
@@ -109,6 +111,23 @@ namespace WormCrawlerPrototype
             }
         }
 
+        private void OnAnyExplosion()
+        {
+            if (Instance != this || _gameEnded)
+            {
+                return;
+            }
+
+            if (!_grenadeAwaitingExplosion)
+            {
+                return;
+            }
+
+            _grenadeAwaitingExplosion = false;
+            _grenadePostExplosionEscapeWindow = true;
+            EnsureRemainingTimeAfterActionWindow();
+        }
+
         public void EndTurnAfterAttack()
         {
             if (_gameEnded)
@@ -116,6 +135,13 @@ namespace WormCrawlerPrototype
                 return;
             }
             if (_damageReactionActive)
+            {
+                return;
+            }
+            // Grenade turns must not end immediately on throw. The thrower gets:
+            // 1) fuse/air time until explosion,
+            // 2) then the regular post-action clamp window after explosion.
+            if (_grenadeAwaitingExplosion || _grenadePostExplosionEscapeWindow)
             {
                 return;
             }
@@ -215,6 +241,9 @@ namespace WormCrawlerPrototype
 
             if (weapon == TurnWeapon.Grenade)
             {
+                _grenadeAwaitingExplosion = true;
+                _grenadePostExplosionEscapeWindow = false;
+
                 var ap = ActivePlayer;
                 if (ap != null)
                 {
@@ -223,7 +252,11 @@ namespace WormCrawlerPrototype
                 }
             }
 
-            ClampRemainingTimeAfterAction();
+            // For grenade we clamp only after the real explosion, not on throw.
+            if (weapon != TurnWeapon.Grenade)
+            {
+                ClampRemainingTimeAfterAction();
+            }
 
             ApplyActiveState();
             return true;
@@ -276,6 +309,19 @@ namespace WormCrawlerPrototype
             }
         }
 
+        private void EnsureRemainingTimeAfterActionWindow()
+        {
+            var total = Mathf.Max(0.01f, turnSeconds);
+            var window = Mathf.Clamp(postActionClampSeconds, 0f, total);
+            if (window <= 0.0001f)
+            {
+                return;
+            }
+
+            // Guarantee exactly the post-action window from now (used for grenade post-explosion escape).
+            _turnT = Mathf.Max(0f, total - window);
+        }
+
         private void Awake()
         {
             // World reloads can create duplicates. The latest instance should take control,
@@ -298,11 +344,13 @@ namespace WormCrawlerPrototype
         private void OnEnable()
         {
             SimpleHealth.Damaged += OnAnyDamaged;
+            ExplosionController.Exploded += OnAnyExplosion;
         }
 
         private void OnDisable()
         {
             SimpleHealth.Damaged -= OnAnyDamaged;
+            ExplosionController.Exploded -= OnAnyExplosion;
         }
 
         private void LateUpdate()
@@ -323,7 +371,16 @@ namespace WormCrawlerPrototype
                 {
                     _damageReactionActive = false;
                     _pendingForcedTurnEnd = false;
-                    NextTurn("damage_reaction_end");
+
+                    // During grenade post-explosion escape window, do not end turn here.
+                    if (_grenadePostExplosionEscapeWindow)
+                    {
+                        ApplyActiveState();
+                    }
+                    else
+                    {
+                        NextTurn("damage_reaction_end");
+                    }
                 }
                 return;
             }
@@ -676,6 +733,8 @@ namespace WormCrawlerPrototype
             _turnLockedWeapon = TurnWeapon.None;
             _turnShotUsed = false;
             _ropeOnlyThisTurn = false;
+            _grenadeAwaitingExplosion = false;
+            _grenadePostExplosionEscapeWindow = false;
             ApplyActiveState();
 
             EnsureTurnStartLogged();
@@ -1092,7 +1151,9 @@ namespace WormCrawlerPrototype
                 }
 
                 var bot = ap.GetComponent<WormCrawlerPrototype.AI.SpiderBotController>();
-                if (bot != null)
+                var apPid = ap.GetComponent<PlayerIdentity>();
+                var isBotControlled = bot != null && Bootstrap.VsCpu && apPid != null && apPid.TeamIndex != spidersTeamIndex;
+                if (isBotControlled)
                 {
                     var id = ap.gameObject.GetInstanceID();
                     if (_lastBotTurnPlayerInstanceId != id)
@@ -1111,7 +1172,9 @@ namespace WormCrawlerPrototype
         private static void SetHeroInputEnabled(GameObject hero, bool enabled)
         {
             var bot = hero.GetComponent<WormCrawlerPrototype.AI.SpiderBotController>();
-            var inputEnabled = enabled && bot == null;
+            var pid = hero.GetComponent<PlayerIdentity>();
+            var isBotControlled = bot != null && Bootstrap.VsCpu && pid != null && pid.TeamIndex == 1;
+            var inputEnabled = enabled && !isBotControlled;
 
             var simpleHero = hero.GetComponent<SimpleHero>();
             if (simpleHero != null) simpleHero.enabled = inputEnabled;
@@ -1151,7 +1214,7 @@ namespace WormCrawlerPrototype
             if (grapple != null)
             {
                 // Bots use external overrides; disable input without forcing detach.
-                grapple.DetachWhenInputDisabled = bot == null;
+                grapple.DetachWhenInputDisabled = !isBotControlled;
                 grapple.InputEnabled = inputEnabled;
             }
         }
