@@ -89,10 +89,12 @@ namespace WormCrawlerPrototype
 
         [Header("Rope In-Hand Sprite")]
         [SerializeField] private string ropeHandSpriteResourcesPath = "Weapons/rope";
-        [SerializeField] private float ropeHandHeightFraction = 0.25f;
-        [SerializeField] private Vector2 ropeHandOffsetFraction = new Vector2(-0.6f, 0.27f);
-        [SerializeField] private Vector2 ropeHandPivotNormalized = new Vector2(0.5f, 0.2f);
+        [SerializeField] private float ropeHandHeightFraction = 0.125f;
+        [SerializeField] private bool ropeHandBaseMirrorY = true;
+        [SerializeField] private Vector2 ropeHandOffsetFraction = new Vector2(0f, -0.15f);
+        [SerializeField] private Vector2 ropeHandPivotNormalized = new Vector2(0.5f, 0.5f);
         [SerializeField] private float ropeHandAimAngleOffsetDeg = 0f;
+        [SerializeField] private bool ropeHandFollowAim = false;
         [SerializeField] private bool ropeHandFlipYWhenFacingLeft = true;
         [SerializeField] private int ropeHandSortingOrderOffset = 25;
 
@@ -610,9 +612,16 @@ namespace WormCrawlerPrototype
             var world = (Vector2)transform.position + baseOffset;
             _ropeHandPivotT.position = new Vector3(world.x, world.y, 0f);
 
-            var d2 = aimDir.sqrMagnitude > 0.0001f ? aimDir : Vector2.right;
-            var ang = Mathf.Atan2(d2.y, d2.x) * Mathf.Rad2Deg + ropeHandAimAngleOffsetDeg;
-            _ropeHandPivotT.rotation = Quaternion.Euler(0f, 0f, ang);
+            if (ropeHandFollowAim)
+            {
+                var d2 = aimDir.sqrMagnitude > 0.0001f ? aimDir : Vector2.right;
+                var ang = Mathf.Atan2(d2.y, d2.x) * Mathf.Rad2Deg + ropeHandAimAngleOffsetDeg;
+                _ropeHandPivotT.rotation = Quaternion.Euler(0f, 0f, ang);
+            }
+            else
+            {
+                _ropeHandPivotT.rotation = Quaternion.Euler(0f, 0f, ropeHandAimAngleOffsetDeg);
+            }
 
             if (_ropeHandSr.sprite != null)
             {
@@ -626,7 +635,8 @@ namespace WormCrawlerPrototype
                     dynY = -1f;
                 }
 
-                _ropeHandSpriteT.localScale = new Vector3(s, s * dynY, 1f);
+                var baseY = ropeHandBaseMirrorY ? -1f : 1f;
+                _ropeHandSpriteT.localScale = new Vector3(s, s * baseY * dynY, 1f);
             }
         }
 

@@ -513,24 +513,13 @@ namespace WormCrawlerPrototype
 
         private void UpdateAutoFire()
         {
-            // Human continuous fire:
-            // - Keyboard: Space
-            // - Mouse: Left button ("hard" button)
-            // - Touch/UI: should call SetExternalHeld(true/false)
-            // We must not clear holds coming from other sources.
+            // Human continuous fire (keyboard/mouse) requires InputEnabled.
+            // External hold (AI bots, touch/UI) works regardless of InputEnabled.
             if (Enabled && InputEnabled)
             {
                 if (Keyboard.current != null && Keyboard.current.spaceKey != null)
                 {
-                    var pressed = Keyboard.current.spaceKey.isPressed;
-                    if (pressed)
-                    {
-                        _keyboardHoldActive = true;
-                    }
-                    else
-                    {
-                        _keyboardHoldActive = false;
-                    }
+                    _keyboardHoldActive = Keyboard.current.spaceKey.isPressed;
                 }
                 else
                 {
@@ -539,21 +528,21 @@ namespace WormCrawlerPrototype
 
                 if (Mouse.current != null && Mouse.current.leftButton != null)
                 {
-                    var pressed = Mouse.current.leftButton.isPressed;
-                    if (pressed)
-                    {
-                        _mouseHoldActive = true;
-                    }
-                    else
-                    {
-                        _mouseHoldActive = false;
-                    }
+                    _mouseHoldActive = Mouse.current.leftButton.isPressed;
                 }
                 else
                 {
                     _mouseHoldActive = false;
                 }
+            }
+            else
+            {
+                _keyboardHoldActive = false;
+                _mouseHoldActive = false;
+            }
 
+            if (Enabled)
+            {
                 var anyHold = _externalHoldActive || _keyboardHoldActive || _mouseHoldActive;
 
                 // Rising edge: treat as a new press so firing starts immediately.
@@ -586,9 +575,6 @@ namespace WormCrawlerPrototype
             }
             else
             {
-                _keyboardHoldActive = false;
-                _mouseHoldActive = false;
-                _externalHoldActive = false;
                 _prevAnyHold = false;
             }
 
