@@ -131,7 +131,20 @@ namespace WormCrawlerPrototype
                 var d = ExternalAimDirection;
                 if (d.sqrMagnitude < 0.0001f) d = Vector2.right;
                 d.Normalize();
-                if (Mathf.Abs(d.x) > 0.15f) _facingSign = d.x >= 0f ? 1 : -1;
+
+                var prevFacing = _facingSign;
+                if (Mathf.Abs(d.x) > 0.0001f)
+                {
+                    _facingSign = d.x >= 0f ? 1 : -1;
+                }
+
+                // If facing just changed while the incoming direction is near-vertical,
+                // prefer horizontal in the new facing direction (avoid visual "snap up" on left turns).
+                if (prevFacing != _facingSign && Mathf.Abs(d.x) < 0.15f)
+                {
+                    d = _facingSign >= 0 ? Vector2.right : Vector2.left;
+                }
+
                 AimDirection = ApplyStepAndClamp(d);
                 AimWorldPoint = AimOriginWorld + AimDirection * Mathf.Max(0.05f, aimRadius);
                 UpdateReticle();

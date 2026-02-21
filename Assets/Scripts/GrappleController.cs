@@ -629,14 +629,14 @@ namespace WormCrawlerPrototype
                 var spriteH = _ropeHandSr.sprite.bounds.size.y;
                 var s = spriteH > 0.0001f ? desiredH / spriteH : 1f;
 
-                var dynY = 1f;
+                var dynX = 1f;
                 if (ropeHandFlipYWhenFacingLeft && facingSign < 0f)
                 {
-                    dynY = -1f;
+                    dynX = -1f;
                 }
 
                 var baseY = ropeHandBaseMirrorY ? -1f : 1f;
-                _ropeHandSpriteT.localScale = new Vector3(s, s * baseY * dynY, 1f);
+                _ropeHandSpriteT.localScale = new Vector3(s * dynX, s * baseY, 1f);
             }
         }
 
