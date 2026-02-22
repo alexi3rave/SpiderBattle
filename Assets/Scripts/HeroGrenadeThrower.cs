@@ -63,6 +63,8 @@ namespace WormCrawlerPrototype
         [SerializeField] private int maxGrenades = 4;
         [SerializeField] private int grenadesLeft = 4;
 
+        public int GrenadesLeft => grenadesLeft;
+
         public void ResetAmmo()
         {
             maxGrenades = Mathf.Max(0, maxGrenades);

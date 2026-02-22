@@ -91,18 +91,47 @@ namespace WormCrawlerPrototype
         [SerializeField] private string ropeHandSpriteResourcesPath = "Weapons/rope";
         [SerializeField] private float ropeHandHeightFraction = 0.125f;
         [SerializeField] private bool ropeHandBaseMirrorY = true;
-        [SerializeField] private Vector2 ropeHandOffsetFraction = new Vector2(0.06f, -0.09f);
+        [SerializeField] private Vector2 ropeHandOffsetFraction = new Vector2(-0.5f, 0.15f);
+        [SerializeField] private Vector2 ropeHandCenterOffsetPixels = Vector2.zero;
+        [SerializeField] private float ropeHandPixelsPerUnit = 100f;
         [SerializeField] private Vector2 ropeHandPivotNormalized = new Vector2(0.5f, 0.5f);
         [SerializeField] private float ropeHandAimAngleOffsetDeg = 0f;
+        [SerializeField] private float ropeHandTridentDownAngleDeg = -180f;
+        [SerializeField] private bool ropeHandUseSharedSettingsForAllHeroes = true;
         [SerializeField] private bool ropeHandFollowAim = false;
         [SerializeField] private bool ropeHandFlipYWhenFacingLeft = true;
-        [SerializeField] private int ropeHandSortingOrderOffset = 25;
+        [SerializeField] private int ropeHandSortingOrderOffset = -2;
 
         private Transform _ropeHandPivotT;
         private Transform _ropeHandSpriteT;
         private SpriteRenderer _ropeHandSr;
         private Sprite _ropeHandSprite;
         private bool _ropeHandVisible;
+
+        private static bool _sharedRopeHandSettingsInitialized;
+        private static Vector2 _sharedRopeHandOffsetFraction;
+        private static Vector2 _sharedRopeHandCenterOffsetPixels;
+        private static float _sharedRopeHandPixelsPerUnit;
+        private static float _sharedRopeHandAimAngleOffsetDeg;
+        private static float _sharedRopeHandTridentDownAngleDeg;
+
+        private void SyncSharedRopeHandSettingsFromThis()
+        {
+            _sharedRopeHandOffsetFraction = ropeHandOffsetFraction;
+            _sharedRopeHandCenterOffsetPixels = ropeHandCenterOffsetPixels;
+            _sharedRopeHandPixelsPerUnit = Mathf.Max(0.01f, ropeHandPixelsPerUnit);
+            _sharedRopeHandAimAngleOffsetDeg = ropeHandAimAngleOffsetDeg;
+            _sharedRopeHandTridentDownAngleDeg = ropeHandTridentDownAngleDeg;
+            _sharedRopeHandSettingsInitialized = true;
+        }
+
+        private void OnValidate()
+        {
+            if (ropeHandUseSharedSettingsForAllHeroes)
+            {
+                SyncSharedRopeHandSettingsFromThis();
+            }
+        }
 
         public void SetRopeHandVisible(bool visible)
         {
@@ -184,12 +213,22 @@ namespace WormCrawlerPrototype
         private bool _externalMoveOverride;
         private float _externalMoveH;
         private float _externalMoveV;
+        private bool _additionalMoveInput;
+        private float _additionalMoveH;
+        private float _additionalMoveV;
 
         public void SetExternalMoveOverride(bool enabled, float moveH, float moveV)
         {
             _externalMoveOverride = enabled;
             _externalMoveH = Mathf.Clamp(moveH, -1f, 1f);
             _externalMoveV = Mathf.Clamp(moveV, -1f, 1f);
+        }
+
+        public void SetAdditionalMoveInput(bool enabled, float moveH, float moveV)
+        {
+            _additionalMoveInput = enabled;
+            _additionalMoveH = Mathf.Clamp(moveH, -1f, 1f);
+            _additionalMoveV = Mathf.Clamp(moveV, -1f, 1f);
         }
         public bool InputEnabled
         {
@@ -267,6 +306,11 @@ namespace WormCrawlerPrototype
 
         private void Awake()
         {
+            if (ropeHandUseSharedSettingsForAllHeroes)
+            {
+                SyncSharedRopeHandSettingsFromThis();
+            }
+
             _rb = GetComponent<Rigidbody2D>();
             _heroCol = GetComponent<Collider2D>();
 
@@ -374,6 +418,10 @@ namespace WormCrawlerPrototype
             _moveH?.Disable();
             _moveV?.Disable();
 
+            _additionalMoveInput = false;
+            _additionalMoveH = 0f;
+            _additionalMoveV = 0f;
+
             // Defensive: hide visuals when disabled so inactive player doesn't show rope artifacts.
             if (line != null) line.enabled = false;
         }
@@ -423,7 +471,7 @@ namespace WormCrawlerPrototype
             if (heroSr != null)
             {
                 line.sortingLayerID = heroSr.sortingLayerID;
-                line.sortingOrder = heroSr.sortingOrder + 5;
+                line.sortingOrder = heroSr.sortingOrder - 2;
             }
             else
             {
@@ -565,7 +613,7 @@ namespace WormCrawlerPrototype
             }
             else
             {
-                _ropeHandSr.sortingOrder = 140;
+                _ropeHandSr.sortingOrder = 40;
             }
 
             pivotGo.SetActive(false);
@@ -608,20 +656,31 @@ namespace WormCrawlerPrototype
                 facingSign = heroSr.flipX ? -1f : 1f;
             }
 
-            var baseOffset = new Vector2(ropeHandOffsetFraction.x * heroW * facingSign, ropeHandOffsetFraction.y * heroH);
+            var effectiveOffsetFraction = ropeHandOffsetFraction;
+            var effectiveCenterOffsetPixels = ropeHandCenterOffsetPixels;
+            var effectivePixelsPerUnit = Mathf.Max(0.01f, ropeHandPixelsPerUnit);
+            var effectiveAimOffsetDeg = ropeHandAimAngleOffsetDeg;
+            var effectiveTridentDownAngleDeg = ropeHandTridentDownAngleDeg;
+            if (ropeHandUseSharedSettingsForAllHeroes && _sharedRopeHandSettingsInitialized)
+            {
+                effectiveOffsetFraction = _sharedRopeHandOffsetFraction;
+                effectiveCenterOffsetPixels = _sharedRopeHandCenterOffsetPixels;
+                effectivePixelsPerUnit = _sharedRopeHandPixelsPerUnit;
+                effectiveAimOffsetDeg = _sharedRopeHandAimAngleOffsetDeg;
+                effectiveTridentDownAngleDeg = _sharedRopeHandTridentDownAngleDeg;
+            }
+
+            // World offset from hero center: relative fraction + pixel tweak from inspector.
+            var ppu = Mathf.Max(0.01f, effectivePixelsPerUnit);
+            var pixelOffset = effectiveCenterOffsetPixels / ppu;
+            var baseOffset = new Vector2(
+                effectiveOffsetFraction.x * heroH * facingSign + pixelOffset.x * facingSign,
+                effectiveOffsetFraction.y * heroH + pixelOffset.y);
             var world = (Vector2)transform.position + baseOffset;
             _ropeHandPivotT.position = new Vector3(world.x, world.y, 0f);
 
-            if (ropeHandFollowAim)
-            {
-                var d2 = aimDir.sqrMagnitude > 0.0001f ? aimDir : Vector2.right;
-                var ang = Mathf.Atan2(d2.y, d2.x) * Mathf.Rad2Deg + ropeHandAimAngleOffsetDeg;
-                _ropeHandPivotT.rotation = Quaternion.Euler(0f, 0f, ang);
-            }
-            else
-            {
-                _ropeHandPivotT.rotation = Quaternion.Euler(0f, 0f, ropeHandAimAngleOffsetDeg);
-            }
+            // Keep the trident end pointing down regardless of facing direction.
+            _ropeHandPivotT.rotation = Quaternion.Euler(0f, 0f, effectiveAimOffsetDeg + effectiveTridentDownAngleDeg);
 
             if (_ropeHandSr.sprite != null)
             {
@@ -629,14 +688,9 @@ namespace WormCrawlerPrototype
                 var spriteH = _ropeHandSr.sprite.bounds.size.y;
                 var s = spriteH > 0.0001f ? desiredH / spriteH : 1f;
 
-                var dynX = 1f;
-                if (ropeHandFlipYWhenFacingLeft && facingSign < 0f)
-                {
-                    dynX = -1f;
-                }
-
+                var mirrorX = facingSign < 0f ? -1f : 1f;
                 var baseY = ropeHandBaseMirrorY ? -1f : 1f;
-                _ropeHandSpriteT.localScale = new Vector3(s * dynX, s * baseY, 1f);
+                _ropeHandSpriteT.localScale = new Vector3(s * mirrorX, s * baseY, 1f);
             }
         }
 
@@ -1743,22 +1797,32 @@ namespace WormCrawlerPrototype
         {
             if (_externalMoveOverride) return _externalMoveH;
             if (!InputEnabled) return 0f;
+            var h = 0f;
             if (_moveH != null)
             {
-                return _moveH.ReadValue<float>();
+                h = _moveH.ReadValue<float>();
             }
-            return 0f;
+            if (_additionalMoveInput)
+            {
+                h = _additionalMoveH;
+            }
+            return Mathf.Clamp(h, -1f, 1f);
         }
 
         private float ReadVInput()
         {
             if (_externalMoveOverride) return _externalMoveV;
             if (!InputEnabled) return 0f;
+            var v = 0f;
             if (_moveV != null)
             {
-                return _moveV.ReadValue<float>();
+                v = _moveV.ReadValue<float>();
             }
-            return 0f;
+            if (_additionalMoveInput)
+            {
+                v = _additionalMoveV;
+            }
+            return Mathf.Clamp(v, -1f, 1f);
         }
 
         private RaycastHit2D RaycastFirstValid(Vector2 origin, Vector2 dir, float distance)

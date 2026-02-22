@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -39,14 +40,23 @@ namespace WormCrawlerPrototype
                 return false;
             }
 
-            if (_turn != null)
+            if (_turn == null)
             {
-                if (!_turn.CanSelectWeapon(TurnManager.TurnWeapon.ClawGun))
+#if UNITY_6000_0_OR_NEWER
+                _turn = Object.FindFirstObjectByType<TurnManager>();
+#else
+                _turn = Object.FindObjectOfType<TurnManager>();
+#endif
+            }
+
+            var needConsumeShot = !_firedSincePress;
+            if (_turn != null && needConsumeShot)
+            {
+                if (!_turn.TryConsumeShot(TurnManager.TurnWeapon.ClawGun))
                 {
-                    if (debugLogs) Debug.Log($"[ClawGun] Blocked by TurnManager.CanSelectWeapon (ropeOnly/shotUsed/locked): ({name})");
+                    if (debugLogs) Debug.Log($"[ClawGun] Blocked by TurnManager.TryConsumeShot (ropeOnly/shotUsed/locked): ({name})");
                     return false;
                 }
-                _turn.NotifyWeaponSelected(TurnManager.TurnWeapon.ClawGun);
             }
 
             var ammoBefore = shotsLeft;
@@ -83,6 +93,7 @@ namespace WormCrawlerPrototype
 
         [Header("Firing")]
         [SerializeField] private float shotsPerSecond = 2f;
+        [SerializeField] private float clawGunEscapeCountdownDelaySeconds = 5f;
         [SerializeField] private float fireAnimationFps = 24f;
         [SerializeField] private int impactOnFrameIndex = 5;
         [SerializeField] private float bulletRange = 25f;
@@ -161,6 +172,8 @@ namespace WormCrawlerPrototype
         private bool _mouseHoldActive;
         private bool _externalHoldActive;
         private bool _prevAnyHold;
+        private float _holdStartedAt = -1f;
+        private Coroutine _pendingReleaseNotifyRoutine;
 
         private bool _animActive;
         private float _animT;
@@ -281,11 +294,13 @@ namespace WormCrawlerPrototype
 
         public void ForceStop()
         {
+            CancelPendingClawReleaseNotify();
             _held = false;
             _keyboardHoldActive = false;
             _mouseHoldActive = false;
             _externalHoldActive = false;
             _prevAnyHold = false;
+            _holdStartedAt = -1f;
             _firedSincePress = false;
             _disableAfterShot = false;
             Enabled = false;
@@ -300,7 +315,9 @@ namespace WormCrawlerPrototype
         {
             if (!InputEnabled) return;
             if (!Enabled) return;
+            CancelPendingClawReleaseNotify();
             _held = true;
+            _holdStartedAt = Time.time;
             _firedSincePress = false;
             _nextShotTime = Mathf.Min(_nextShotTime, Time.time);
             if (debugLogs) Debug.Log($"[ClawGun] OnShootStarted: Enabled={Enabled} InputEnabled={InputEnabled} held={_held} ({name})");
@@ -346,10 +363,92 @@ namespace WormCrawlerPrototype
                 {
                     if (_firedSincePress)
                     {
-                        _turn.NotifyClawGunReleased();
+                        NotifyClawGunReleasedWithDelay();
                     }
                 }
             }
+        }
+
+        private void CancelPendingClawReleaseNotify()
+        {
+            if (_pendingReleaseNotifyRoutine != null)
+            {
+                StopCoroutine(_pendingReleaseNotifyRoutine);
+                _pendingReleaseNotifyRoutine = null;
+            }
+        }
+
+        private void NotifyClawGunReleasedWithDelay()
+        {
+            if (!_firedSincePress)
+            {
+                return;
+            }
+
+            if (_turn == null)
+            {
+#if UNITY_6000_0_OR_NEWER
+                _turn = Object.FindFirstObjectByType<TurnManager>();
+#else
+                _turn = Object.FindObjectOfType<TurnManager>();
+#endif
+            }
+
+            if (_turn == null)
+            {
+                return;
+            }
+
+            var threshold = Mathf.Max(0f, clawGunEscapeCountdownDelaySeconds);
+            var heldFor = _holdStartedAt >= 0f ? Mathf.Max(0f, Time.time - _holdStartedAt) : threshold;
+            var delay = Mathf.Max(0f, threshold - heldFor);
+
+            CancelPendingClawReleaseNotify();
+            if (delay <= 0.0001f)
+            {
+                _turn.NotifyClawGunReleased();
+                return;
+            }
+
+            _pendingReleaseNotifyRoutine = StartCoroutine(NotifyClawGunReleasedDelayed(delay));
+        }
+
+        private IEnumerator NotifyClawGunReleasedDelayed(float delay)
+        {
+            if (delay > 0f)
+            {
+                yield return new WaitForSeconds(delay);
+            }
+
+            _pendingReleaseNotifyRoutine = null;
+
+            if (_turn == null)
+            {
+#if UNITY_6000_0_OR_NEWER
+                _turn = Object.FindFirstObjectByType<TurnManager>();
+#else
+                _turn = Object.FindObjectOfType<TurnManager>();
+#endif
+            }
+
+            if (_turn == null)
+            {
+                yield break;
+            }
+
+            var ap = _turn.ActivePlayer;
+            if (ap == null)
+            {
+                yield break;
+            }
+
+            var sameHero = ap == transform || transform.IsChildOf(ap) || ap.IsChildOf(transform);
+            if (!sameHero)
+            {
+                yield break;
+            }
+
+            _turn.NotifyClawGunReleased();
         }
 
         private void LateUpdate()
@@ -548,7 +647,9 @@ namespace WormCrawlerPrototype
                 // Rising edge: treat as a new press so firing starts immediately.
                 if (anyHold && !_prevAnyHold)
                 {
+                    CancelPendingClawReleaseNotify();
                     _firedSincePress = false;
+                    _holdStartedAt = Time.time;
                     _nextShotTime = Mathf.Min(_nextShotTime, Time.time);
                 }
 
@@ -566,7 +667,7 @@ namespace WormCrawlerPrototype
 
                     if (_turn != null && _firedSincePress)
                     {
-                        _turn.NotifyClawGunReleased();
+                        NotifyClawGunReleasedWithDelay();
                     }
                 }
 
@@ -592,7 +693,7 @@ namespace WormCrawlerPrototype
 #endif
             }
 
-            if (_turn != null && !_turn.CanSelectWeapon(TurnManager.TurnWeapon.ClawGun))
+            if (_turn != null && !_firedSincePress && !_turn.CanSelectWeapon(TurnManager.TurnWeapon.ClawGun))
             {
                 if (debugLogs) Debug.Log($"[ClawGun] AutoFire stopped: CanSelectWeapon=false ({name})");
                 _held = false;

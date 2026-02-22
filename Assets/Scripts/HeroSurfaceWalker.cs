@@ -44,11 +44,19 @@ namespace WormCrawlerPrototype
 
         private bool _externalMoveOverride;
         private float _externalMoveH;
+        private bool _additionalMoveInput;
+        private float _additionalMoveH;
 
         public void SetExternalMoveOverride(bool enabled, float moveH)
         {
             _externalMoveOverride = enabled;
             _externalMoveH = Mathf.Clamp(moveH, -1f, 1f);
+        }
+
+        public void SetAdditionalMoveInput(bool enabled, float moveH)
+        {
+            _additionalMoveInput = enabled;
+            _additionalMoveH = Mathf.Clamp(moveH, -1f, 1f);
         }
 
         public void SetIdleAnchorLock(bool enabled)
@@ -206,6 +214,8 @@ namespace WormCrawlerPrototype
 
             _externalMoveOverride = false;
             _externalMoveH = 0f;
+            _additionalMoveInput = false;
+            _additionalMoveH = 0f;
 
             if (_idleAnchor != null) _idleAnchor.enabled = false;
             _idleAnchorEngaged = false;
@@ -242,7 +252,7 @@ namespace WormCrawlerPrototype
             }
             else
             {
-                input = InputEnabled && _moveH != null ? Mathf.Clamp(_moveH.ReadValue<float>(), -1f, 1f) : 0f;
+                input = ReadHorizontalInput();
             }
             UpdateSurfaceMaterial(input);
 
@@ -263,6 +273,16 @@ namespace WormCrawlerPrototype
             }
             UpdateAnimator(input);
             UpdateFacing(input);
+        }
+
+        private float ReadHorizontalInput()
+        {
+            var h = InputEnabled && _moveH != null ? Mathf.Clamp(_moveH.ReadValue<float>(), -1f, 1f) : 0f;
+            if (_additionalMoveInput)
+            {
+                h = Mathf.Clamp(_additionalMoveH, -1f, 1f);
+            }
+            return h;
         }
 
         private void UpdateFallDamageState()
@@ -690,7 +710,7 @@ namespace WormCrawlerPrototype
         private void UpdateFacing(float input)
         {
             var lookX = 0f;
-            if (!_externalMoveOverride && _aim != null)
+            if (_aim != null)
             {
                 var d = _aim.AimDirection;
                 if (Mathf.Abs(d.x) > 0.01f)

@@ -54,6 +54,8 @@ namespace WormCrawlerPrototype
         private bool _ropeOnlyThisTurn;
         private bool _grenadeAwaitingExplosion;
         private bool _grenadePostExplosionEscapeWindow;
+        private bool _pendingTurnEndAfterGrenadeResolution;
+        private int _pendingTurnEndAfterGrenadeResolutionMinFrame;
 
         private bool _damageReactionActive;
         private float _damageReactionEndT;
@@ -124,6 +126,16 @@ namespace WormCrawlerPrototype
             }
 
             _grenadeAwaitingExplosion = false;
+
+            // Active hero already took damage this turn (e.g., fall) and must end turn
+            // only after grenade explosion + damage processing is fully resolved.
+            if (_pendingTurnEndAfterGrenadeResolution)
+            {
+                _grenadePostExplosionEscapeWindow = false;
+                _pendingTurnEndAfterGrenadeResolutionMinFrame = Mathf.Max(_pendingTurnEndAfterGrenadeResolutionMinFrame, Time.frameCount + 1);
+                return;
+            }
+
             _grenadePostExplosionEscapeWindow = true;
             EnsureRemainingTimeAfterActionWindow();
         }
@@ -131,6 +143,12 @@ namespace WormCrawlerPrototype
         public void EndTurnAfterAttack()
         {
             if (_gameEnded)
+            {
+                return;
+            }
+            // Ignore stale async attack-end calls from previous turns/coroutines.
+            // A legal attack_end is only possible after a shot was consumed this turn.
+            if (!_turnShotUsed)
             {
                 return;
             }
@@ -252,8 +270,10 @@ namespace WormCrawlerPrototype
                 }
             }
 
-            // For grenade we clamp only after the real explosion, not on throw.
-            if (weapon != TurnWeapon.Grenade)
+            // Clamp immediately for single-action weapons.
+            // Grenade clamps only after explosion; ClawGun clamps on fire-release
+            // so the post-action escape window does not burn during active burst.
+            if (weapon != TurnWeapon.Grenade && weapon != TurnWeapon.ClawGun)
             {
                 ClampRemainingTimeAfterAction();
             }
@@ -404,6 +424,16 @@ namespace WormCrawlerPrototype
                 return;
             }
 
+            if (_pendingTurnEndAfterGrenadeResolution
+                && !_grenadeAwaitingExplosion
+                && Time.frameCount >= _pendingTurnEndAfterGrenadeResolutionMinFrame)
+            {
+                _pendingTurnEndAfterGrenadeResolution = false;
+                _grenadePostExplosionEscapeWindow = false;
+                NextTurn("active_damage_after_grenade_resolution");
+                return;
+            }
+
             _turnT += Time.deltaTime;
             _playersReadyT += Time.deltaTime;
             if (_turnT >= Mathf.Max(1f, turnSeconds))
@@ -462,10 +492,6 @@ namespace WormCrawlerPrototype
                 return;
             }
 
-            // Strict timing rule: the remaining time for the active player may only change
-            // after a shot or a damage event. Damage event -> clamp remaining time.
-            ClampRemainingTimeAfterAction();
-
             var ap = ActivePlayer;
             if (ap == null)
             {
@@ -484,6 +510,44 @@ namespace WormCrawlerPrototype
 
             var damagedIsActive = ht == ap || ht.IsChildOf(ap);
             var damagedIsEnemy = !damagedIsActive && damagedTeam != apTeam;
+
+            // If active hero takes fall damage or gets hit by grenade explosion during their own turn,
+            // end turn immediately after damage is applied: no delayed reaction and no escape window.
+            if (damagedIsActive && (source == DamageSource.Fall || source == DamageSource.GrenadeExplosion))
+            {
+                if (damagedHeroRoot != null)
+                {
+                    StartDamageFeedbackOnly(damagedHeroRoot, health, amount);
+                }
+
+                _damageReactionActive = false;
+                _pendingForcedTurnEnd = false;
+
+                // If grenade was thrown and has not exploded yet, keep the same active hero
+                // until explosion resolves; then end turn immediately with no escape window.
+                if (source == DamageSource.Fall && _grenadeAwaitingExplosion)
+                {
+                    _pendingTurnEndAfterGrenadeResolution = true;
+                    _pendingTurnEndAfterGrenadeResolutionMinFrame = Time.frameCount + 1;
+                    _grenadePostExplosionEscapeWindow = false;
+                    ApplyActiveState();
+                    return;
+                }
+
+                _pendingTurnEndAfterGrenadeResolution = false;
+                _grenadeAwaitingExplosion = false;
+                _grenadePostExplosionEscapeWindow = false;
+                NextTurn(source == DamageSource.Fall ? "active_fall_damage" : "active_self_grenade_damage");
+                return;
+            }
+
+            // Strict timing rule: remaining time may change only after shot/damage.
+            // Exception for ClawGun burst: defer clamp until fire release
+            // (NotifyClawGunReleased), otherwise the escape window is consumed while firing.
+            if (!(source == DamageSource.ClawGun && !_ropeOnlyThisTurn))
+            {
+                ClampRemainingTimeAfterAction();
+            }
 
             if (damagedIsActive)
             {
@@ -744,6 +808,8 @@ namespace WormCrawlerPrototype
             _ropeOnlyThisTurn = false;
             _grenadeAwaitingExplosion = false;
             _grenadePostExplosionEscapeWindow = false;
+            _pendingTurnEndAfterGrenadeResolution = false;
+            _pendingTurnEndAfterGrenadeResolutionMinFrame = 0;
             ApplyActiveState();
 
             EnsureTurnStartLogged();
@@ -1185,8 +1251,15 @@ namespace WormCrawlerPrototype
             var isBotControlled = bot != null && Bootstrap.VsCpu && pid != null && pid.TeamIndex == 1;
             var inputEnabled = enabled && !isBotControlled;
 
+            var walker = hero.GetComponent<HeroSurfaceWalker>();
+
             var simpleHero = hero.GetComponent<SimpleHero>();
-            if (simpleHero != null) simpleHero.enabled = inputEnabled;
+            if (simpleHero != null)
+            {
+                // Legacy controller is deprecated; keep it disabled to avoid
+                // mixed movement pipelines and inconsistent behavior.
+                simpleHero.enabled = false;
+            }
 
             var aim = hero.GetComponent<WormAimController>();
             if (aim != null)
@@ -1195,9 +1268,13 @@ namespace WormCrawlerPrototype
                 aim.InputEnabled = inputEnabled;
             }
 
-            var walker = hero.GetComponent<HeroSurfaceWalker>();
             if (walker != null)
             {
+                if (!enabled)
+                {
+                    walker.SetExternalMoveOverride(false, 0f);
+                    walker.SetAdditionalMoveInput(false, 0f);
+                }
                 walker.InputEnabled = inputEnabled;
             }
 
@@ -1222,6 +1299,16 @@ namespace WormCrawlerPrototype
             var grapple = hero.GetComponent<GrappleController>();
             if (grapple != null)
             {
+                if (!enabled)
+                {
+                    grapple.SetAdditionalMoveInput(false, 0f, 0f);
+                    grapple.SetExternalMoveOverride(false, 0f, 0f);
+                    if (grapple.IsAttached)
+                    {
+                        grapple.ForceDetach();
+                    }
+                }
+
                 // Bots use external overrides; disable input without forcing detach.
                 grapple.DetachWhenInputDisabled = !isBotControlled;
                 grapple.InputEnabled = inputEnabled;

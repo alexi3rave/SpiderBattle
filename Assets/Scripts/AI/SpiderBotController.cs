@@ -153,12 +153,24 @@ namespace WormCrawlerPrototype.AI
         [SerializeField] private float closeRangeOverrideFactor = 0.5f;
         [SerializeField] private float ropePostManeuverRecheckDelay = 0.05f;
         [SerializeField] private bool debugLogs = false;
+        [SerializeField, Range(0f, 1f)] private float ropeGrenadeAttackChance = 0.30f;
+        [SerializeField, Range(0f, 1f)] private float clawThroughTerrainChance = 0.30f;
 
         [SerializeField, Range(0f, 1f)] private float targetClawShotFractionPerTeam = 0.5f;
 
         private static int[] _botTeamShotsTotal;
         private static int[] _botTeamShotsClaw;
         private static int[] _botTeamLastLoggedTotal;
+
+        private bool ShouldUseRopeGrenadeAttackNow()
+        {
+            return Random.value < Mathf.Clamp01(ropeGrenadeAttackChance);
+        }
+
+        private bool ShouldUseTerrainPierceClawNow()
+        {
+            return Random.value < Mathf.Clamp01(clawThroughTerrainChance);
+        }
 
         private Coroutine _routine;
         private TurnManager _turn;
@@ -323,10 +335,23 @@ namespace WormCrawlerPrototype.AI
                     }
                 }
 
+                var hasClawAim = false;
+                var clawAimDir = Vector2.right;
+                var allowTerrainPierceClaw = ShouldUseTerrainPierceClawNow();
+                if (canClaw)
+                {
+                    hasClawAim = TryFindClawAim(target, origin, targetPoint, effectiveClawRange, botClawFireDownOffsetDeg, allowTerrainPierceClaw, out clawAimDir);
+                    if (!hasClawAim)
+                    {
+                        canClaw = false;
+                    }
+                }
+
                 if (!canClaw && !canGrenade)
                 {
                     if (debugLogs) Debug.Log($"[SpiderBot] Can't shoot yet (dist {distToTarget:0.0}), canClaw={canClaw}, canGrenade={canGrenade} ({name})");
-                    yield return new WaitForSeconds(0.12f);
+                    // If no valid hit line/trajectory exists, actively reposition instead of blind fire.
+                    yield return ApproachUntilInRange(target, myTeam, grapple, aim, walker);
                     continue;
                 }
 
@@ -347,15 +372,19 @@ namespace WormCrawlerPrototype.AI
 
                 if (weapon == TurnManager.TurnWeapon.ClawGun)
                 {
-                    if (TryFindClawAim(target, origin, targetPoint, effectiveClawRange, botClawFireDownOffsetDeg, out var clawAim))
+                    if (hasClawAim)
                     {
-                        desiredAimDir = clawAim;
+                        desiredAimDir = clawAimDir;
+                    }
+                    else
+                    {
+                        yield return ApproachUntilInRange(target, myTeam, grapple, aim, walker);
+                        continue;
                     }
                 }
 
-                var noisyAimDir = ComputeAimDirectionWithDifficulty(desiredAimDir);
-
-                var finalAimDir = noisyAimDir;
+                // Fire only with validated trajectory/line; avoid noisy direction at shot moment.
+                var finalAimDir = desiredAimDir;
                 if (aim != null)
                 {
                     aim.SetExternalAimOverride(true, finalAimDir);
@@ -397,7 +426,7 @@ namespace WormCrawlerPrototype.AI
                                 var trackDir = (trackPoint - trackOrigin);
                                 if (trackDir.sqrMagnitude > 0.0001f)
                                 {
-                                    if (TryFindClawAim(target, trackOrigin, trackPoint, effectiveClawRange, botClawFireDownOffsetDeg, out var trackAim))
+                                    if (TryFindClawAim(target, trackOrigin, trackPoint, effectiveClawRange, botClawFireDownOffsetDeg, allowTerrainPierceClaw, out var trackAim))
                                     {
                                         aim.SetExternalAimOverride(true, trackAim);
                                     }
@@ -460,7 +489,10 @@ namespace WormCrawlerPrototype.AI
                 if (_turn != null && _turn.ActivePlayer == transform)
                 {
                     yield return RetreatRoutine(myTeam, grapple, aim, walker, retreatAfterAttackSeconds);
-                    _turn.EndTurnAfterAttack();
+                    if (_turn != null && _turn.ActivePlayer == transform)
+                    {
+                        _turn.EndTurnAfterAttack();
+                    }
                 }
             }
         }
@@ -519,6 +551,18 @@ namespace WormCrawlerPrototype.AI
                 }
             }
 
+            var hasClawAim = false;
+            var clawAimDir = Vector2.right;
+            var allowTerrainPierceClaw = ShouldUseTerrainPierceClawNow();
+            if (canClaw)
+            {
+                hasClawAim = TryFindClawAim(target, origin, targetPoint, effectiveClawRange, botClawFireDownOffsetDeg, allowTerrainPierceClaw, out clawAimDir);
+                if (!hasClawAim)
+                {
+                    canClaw = false;
+                }
+            }
+
             if (!canClaw && !canGrenade)
             {
                 yield break;
@@ -536,7 +580,7 @@ namespace WormCrawlerPrototype.AI
                     {
                         desiredAimDir = grenadeAimDir;
 
-                        if (difficulty == BotDifficulty.Hard && grapple != null && grapple.IsAttached)
+                        if (grapple != null && grapple.IsAttached && ShouldUseRopeGrenadeAttackNow())
                         {
                             if (ammo != null) ammo.SelectGrenade();
                             yield return new WaitForSeconds(0.10f);
@@ -564,7 +608,21 @@ namespace WormCrawlerPrototype.AI
                 }
             }
 
-            var aimDir = ComputeAimDirectionWithDifficulty(desiredAimDir);
+            if (weapon == TurnManager.TurnWeapon.ClawGun)
+            {
+                if (hasClawAim)
+                {
+                    desiredAimDir = clawAimDir;
+                }
+                else
+                {
+                    // Post-rope recheck failed to find a hit line; caller should continue reposition.
+                    yield break;
+                }
+            }
+
+            // Fire only with validated trajectory/line; avoid noisy direction at shot moment.
+            var aimDir = desiredAimDir;
             if (aim != null)
             {
                 aim.SetExternalAimOverride(true, aimDir);
@@ -604,7 +662,7 @@ namespace WormCrawlerPrototype.AI
                             var trackDir = (trackPoint - trackOrigin);
                             if (trackDir.sqrMagnitude > 0.0001f)
                             {
-                                if (TryFindClawAim(target, trackOrigin, trackPoint, effectiveClawRange, botClawFireDownOffsetDeg, out var trackAim))
+                                if (TryFindClawAim(target, trackOrigin, trackPoint, effectiveClawRange, botClawFireDownOffsetDeg, allowTerrainPierceClaw, out var trackAim))
                                 {
                                     aim.SetExternalAimOverride(true, trackAim);
                                 }
@@ -655,7 +713,10 @@ namespace WormCrawlerPrototype.AI
             if (_turn != null && _turn.ActivePlayer == transform)
             {
                 yield return RetreatRoutine(myTeam, grapple, aim, walker, retreatAfterAttackSeconds);
-                _turn.EndTurnAfterAttack();
+                if (_turn != null && _turn.ActivePlayer == transform)
+                {
+                    _turn.EndTurnAfterAttack();
+                }
             }
 
             if (shot != null) shot.Value = true;
@@ -810,12 +871,15 @@ namespace WormCrawlerPrototype.AI
                     progressCheckT = Time.time;
                 }
 
-                var canClaw = distBeforeWalk <= clawGunRange && HasLineOfSight(origin, target, myTeam);
-                var heroH0 = GetHeroHeight();
-                var grenadeExplosionRadius = Mathf.Max(0.25f, heroH0 * 2.5f);
-
                 var grenade = GetComponent<HeroGrenadeThrower>();
                 var effectiveGrenadeRange = grenade != null ? Mathf.Max(0.1f, grenade.GetMaxRangePublic()) : grenadeRange;
+                var effectiveClawRange = Mathf.Max(0.1f, effectiveGrenadeRange * 1.5f);
+                var allowTerrainPierceClaw = ShouldUseTerrainPierceClawNow();
+
+                var canClaw = distBeforeWalk <= effectiveClawRange
+                    && TryFindClawAim(target, origin, targetPoint, effectiveClawRange, botClawFireDownOffsetDeg, allowTerrainPierceClaw, out _);
+                var heroH0 = GetHeroHeight();
+                var grenadeExplosionRadius = Mathf.Max(0.25f, heroH0 * 2.5f);
                 var canGrenadeByDist = distBeforeWalk <= effectiveGrenadeRange && distBeforeWalk > grenadeExplosionRadius;
                 var canGrenade = false;
                 if (canGrenadeByDist && grenade != null)
@@ -1022,7 +1086,34 @@ namespace WormCrawlerPrototype.AI
             var sign = (targetPoint.x - origin.x) >= 0f ? 1f : -1f;
 
             grapple.SetExternalMoveOverride(true, moveH: sign, moveV: 0f);
-            yield return new WaitForSeconds(Mathf.Max(0.05f, ropeSwingSeconds));
+            var swingStart = Time.time;
+            var swingDur = Mathf.Max(0.05f, ropeSwingSeconds);
+            var ropeAttackTried = false;
+            while (Time.time - swingStart < swingDur)
+            {
+                if (_turn == null || _turn.ActivePlayer != transform)
+                {
+                    break;
+                }
+
+                if (!ropeAttackTried && grapple.IsAttached && ShouldUseRopeGrenadeAttackNow())
+                {
+                    ropeAttackTried = true;
+                    var ropeShot = new BoolHolder();
+                    yield return TryShootIfPossibleNowRoutine(target, grapple, aim, walker, ropeShot);
+                    if (ropeShot.Value)
+                    {
+                        grapple.SetExternalMoveOverride(false, 0f, 0f);
+                        if (movedOut != null)
+                        {
+                            movedOut.Value = ((Vector2)transform.position - startPos).magnitude;
+                        }
+                        yield break;
+                    }
+                }
+
+                yield return new WaitForSeconds(0.08f);
+            }
 
             grapple.SetExternalMoveOverride(false, 0f, 0f);
             yield return SafeDetachRopeRoutine(grapple, anchorLikelyBelow: true);
@@ -1176,6 +1267,8 @@ namespace WormCrawlerPrototype.AI
             {
                 if (_turn == null || _turn.ActivePlayer != transform)
                 {
+                    if (walker != null) walker.SetExternalMoveOverride(false, 0f);
+                    if (grapple != null) grapple.SetExternalMoveOverride(false, 0f, 0f);
                     yield break;
                 }
 
@@ -1542,7 +1635,7 @@ namespace WormCrawlerPrototype.AI
             };
         }
 
-        private static bool TryFindClawAim(Transform target, Vector2 origin, Vector2 targetPoint, float range, float fireDownOffsetDeg, out Vector2 aimDir)
+        private static bool TryFindClawAim(Transform target, Vector2 origin, Vector2 targetPoint, float range, float fireDownOffsetDeg, bool ignoreTerrain, out Vector2 aimDir)
         {
             aimDir = Vector2.right;
             if (target == null)
@@ -1559,6 +1652,8 @@ namespace WormCrawlerPrototype.AI
 
             var baseDir = toTarget.normalized;
             var baseAng = Mathf.Atan2(baseDir.y, baseDir.x) * Mathf.Rad2Deg;
+            var terrainLayer = LayerMask.NameToLayer("Terrain");
+            var terrainObstacleLayer = LayerMask.NameToLayer("TerrainObstacle");
 
             Vector2 ApplyClawFireDownOffset(Vector2 d)
             {
@@ -1578,13 +1673,44 @@ namespace WormCrawlerPrototype.AI
             bool HitsTarget(Vector2 d)
             {
                 var fireDir = ApplyClawFireDownOffset(d);
-                var hit = Physics2D.Raycast(origin, fireDir, range, ~0);
-                if (hit.collider == null || hit.collider.isTrigger)
+                var hits = Physics2D.RaycastAll(origin, fireDir, range, ~0);
+                if (hits == null || hits.Length == 0)
                 {
                     return false;
                 }
-                var ht = hit.collider.transform;
-                return ht == target || ht.IsChildOf(target);
+
+                for (var i = 0; i < hits.Length; i++)
+                {
+                    var h = hits[i];
+                    if (h.collider == null || h.collider.isTrigger)
+                    {
+                        continue;
+                    }
+
+                    var ht = h.collider.transform;
+                    if (ht == null)
+                    {
+                        continue;
+                    }
+
+                    if (ht == target || ht.IsChildOf(target))
+                    {
+                        return true;
+                    }
+
+                    if (ignoreTerrain)
+                    {
+                        var layer = h.collider.gameObject.layer;
+                        if (layer == terrainLayer || layer == terrainObstacleLayer)
+                        {
+                            continue;
+                        }
+                    }
+
+                    return false;
+                }
+
+                return false;
             }
 
             if (HitsTarget(baseDir))

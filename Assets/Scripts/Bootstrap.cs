@@ -87,6 +87,16 @@ namespace WormCrawlerPrototype
         private Scene _pendingScene;
         private bool _hasPendingScene;
 
+        private Texture2D _menuPanelTex;
+        private Texture2D _menuBtnNormalTex;
+        private Texture2D _menuBtnSelectedTex;
+        private Texture2D _menuBtnNavTex;
+        private float _menuAnimTime;
+        private Vector2 _menuTouchScrollVel;
+        private bool _menuTouchDragging;
+        private Vector2 _menuTouchStart;
+        private float _menuTouchScrollStart;
+
         private bool _isDragging;
         private Vector2 _dragStartMouse;
         private Vector3 _dragStartCamPos;
@@ -229,6 +239,7 @@ namespace WormCrawlerPrototype
             if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
             {
                 _showPauseMenu = !_showPauseMenu;
+                if (_showPauseMenu) _menuAnimTime = 0f;
                 IsMapMenuOpen = _showPauseMenu;
                 return;
             }
@@ -525,15 +536,18 @@ namespace WormCrawlerPrototype
             var keyFire = mirrorKeyboard && kb != null && (kb.spaceKey.isPressed || kb.enterKey.isPressed);
 
             var pressedFire = DrawRoundMobileButton(fireRect, string.Empty, keyFire, repeat: true, ringTex: _touchCircleRingFireTex);
-            var pressedUp = DrawRoundMobileButton(upRect, "↑", keyUp, repeat: true);
-            var pressedLeft = DrawRoundMobileButton(leftRect, "←", keyLeft, repeat: true);
-            var pressedRight = DrawRoundMobileButton(rightRect, "→", keyRight, repeat: true);
-            var pressedDown = DrawRoundMobileButton(downRect, "↓", keyDown, repeat: true);
+            var pressedUp = DrawRoundMobileButton(upRect, string.Empty, keyUp, repeat: true, arrowDirection: Vector2.up);
+            var pressedLeft = DrawRoundMobileButton(leftRect, string.Empty, keyLeft, repeat: true, arrowDirection: Vector2.left);
+            var pressedRight = DrawRoundMobileButton(rightRect, string.Empty, keyRight, repeat: true, arrowDirection: Vector2.right);
+            var pressedDown = DrawRoundMobileButton(downRect, string.Empty, keyDown, repeat: true, arrowDirection: Vector2.down);
 
-            ApplyMobileInputs(ap, pressedLeft || keyLeft, pressedRight || keyRight, pressedUp || keyUp, pressedDown || keyDown, pressedFire || keyFire);
+            if (Event.current.type == EventType.Repaint)
+            {
+                ApplyMobileInputs(ap, pressedLeft || keyLeft, pressedRight || keyRight, pressedUp || keyUp, pressedDown || keyDown, pressedFire || keyFire);
+            }
         }
 
-        private bool DrawRoundMobileButton(Rect r, string label, bool keyboardPressed, bool repeat, Texture2D ringTex = null)
+        private bool DrawRoundMobileButton(Rect r, string label, bool keyboardPressed, bool repeat, Texture2D ringTex = null, Vector2 arrowDirection = default)
         {
             var colPrev = GUI.color;
 
@@ -553,21 +567,94 @@ namespace WormCrawlerPrototype
                 GUI.DrawTexture(r, ringTex, ScaleMode.StretchToFill, alphaBlend: true);
             }
 
-            var prevAlign = _mobileButtonStyle.alignment;
-            _mobileButtonStyle.alignment = TextAnchor.MiddleCenter;
-            if (!string.IsNullOrEmpty(label))
+            if (arrowDirection.sqrMagnitude > 0.0001f)
             {
-                GUI.Label(r, label, _mobileButtonStyle);
+                DrawTouchArrowGlyph(r, arrowDirection, isPressed);
             }
-            _mobileButtonStyle.alignment = prevAlign;
+            else
+            {
+                var prevAlign = _mobileButtonStyle.alignment;
+                _mobileButtonStyle.alignment = TextAnchor.MiddleCenter;
+                if (!string.IsNullOrEmpty(label))
+                {
+                    GUI.Label(r, label, _mobileButtonStyle);
+                }
+                _mobileButtonStyle.alignment = prevAlign;
+            }
 
             return pressedNow;
         }
 
+        private static void DrawTouchArrowGlyph(Rect r, Vector2 logicalDir, bool pressed)
+        {
+            if (logicalDir.sqrMagnitude < 0.0001f)
+            {
+                return;
+            }
+
+            var prevColor = GUI.color;
+            GUI.color = pressed ? new Color(1f, 1f, 1f, 0.98f) : new Color(1f, 1f, 1f, 0.92f);
+
+            var size = Mathf.Min(r.width, r.height);
+            var shaftLen = size * 0.32f;
+            var shaftThickness = Mathf.Max(5f, size * 0.11f);
+            var headLen = size * 0.16f;
+            var headSpread = size * 0.12f;
+
+            var center = new Vector2(r.x + r.width * 0.5f, r.y + r.height * 0.5f);
+
+            // GUI has down-positive Y; convert logical world-like direction to GUI direction.
+            var dir = new Vector2(logicalDir.x, -logicalDir.y).normalized;
+            var side = new Vector2(-dir.y, dir.x);
+
+            var tail = center - dir * (shaftLen * 0.5f);
+            var tip = center + dir * (shaftLen * 0.5f);
+            var headBase = tip - dir * headLen;
+
+            DrawGuiLine(tail, tip, shaftThickness);
+            DrawGuiLine(tip, headBase + side * headSpread, shaftThickness);
+            DrawGuiLine(tip, headBase - side * headSpread, shaftThickness);
+
+            GUI.color = prevColor;
+        }
+
+        private static void DrawGuiLine(Vector2 from, Vector2 to, float thickness)
+        {
+            var delta = to - from;
+            var len = delta.magnitude;
+            if (len < 0.001f)
+            {
+                return;
+            }
+
+            var prevMatrix = GUI.matrix;
+            var angle = Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg;
+            GUIUtility.RotateAroundPivot(angle, from);
+            GUI.DrawTexture(new Rect(from.x, from.y - thickness * 0.5f, len, thickness), Texture2D.whiteTexture);
+            GUI.matrix = prevMatrix;
+        }
+
         private bool _mobileFireWasPressed;
         private bool _mobileAimOverrideActive;
+        private int _mobileAimOverridePlayerInstanceId;
+        private int _mobileAimFacingSign = 1;
+
         private void ApplyMobileInputs(Transform ap, bool left, bool right, bool up, bool down, bool fire)
         {
+            // If the active player changed, reset mobile aim override state.
+            var apInstanceId = ap.GetInstanceID();
+            if (_mobileAimOverrideActive && apInstanceId != _mobileAimOverridePlayerInstanceId)
+            {
+                var prevAim = ap.GetComponent<WormAimController>();
+                if (prevAim != null) prevAim.SetExternalAimOverride(false, Vector2.right);
+                _mobileAimOverrideActive = false;
+                _mobileAimFacingSign = 1;
+            }
+            _mobileAimOverridePlayerInstanceId = apInstanceId;
+
+            var grenade = ap.GetComponent<HeroGrenadeThrower>();
+            var grenadeEnabled = grenade != null && grenade.Enabled;
+
             var walker = ap.GetComponent<HeroSurfaceWalker>();
             if (walker != null)
             {
@@ -575,10 +662,12 @@ namespace WormCrawlerPrototype
                 if (left && !right) h = -1f;
                 else if (right && !left) h = 1f;
 
-                walker.SetExternalMoveOverride((left || right), h);
+                walker.SetAdditionalMoveInput((left || right), h);
             }
 
             var grapple = ap.GetComponent<GrappleController>();
+            var ropeAttached = grapple != null && grapple.IsAttached;
+            var ropeGrenadeMode = ropeAttached && grenadeEnabled;
             if (grapple != null)
             {
                 var moveH = 0f;
@@ -586,45 +675,128 @@ namespace WormCrawlerPrototype
                 else if (right && !left) moveH = 1f;
 
                 var moveV = 0f;
-                if (up && !down) moveV = 1f;
-                else if (down && !up) moveV = -1f;
+                if (!ropeGrenadeMode)
+                {
+                    if (up && !down) moveV = 1f;
+                    else if (down && !up) moveV = -1f;
+                }
 
-                grapple.SetExternalMoveOverride((left || right || up || down), moveH, moveV);
+                grapple.SetAdditionalMoveInput((left || right || up || down), moveH, moveV);
             }
 
             var aim = ap.GetComponent<WormAimController>();
             var aimDir = aim != null ? aim.AimDirection : Vector2.right;
+            if (Mathf.Abs(aimDir.x) > 0.15f)
+            {
+                _mobileAimFacingSign = aimDir.x >= 0f ? 1 : -1;
+            }
 
             if (aim != null)
             {
                 var wantAimAdjust = up || down;
                 var wantFacing = left ^ right;
 
-                if (wantAimAdjust)
+                if (ropeAttached && !grenadeEnabled)
+                {
+                    // Rope movement mode: do not rotate aim with movement keys.
+                    // Keep only left/right facing updates so the hero does not slide sideways visually.
+                    if (wantFacing)
+                    {
+                        var facingDir = right ? Vector2.right : Vector2.left;
+                        _mobileAimFacingSign = right ? 1 : -1;
+                        aim.SetExternalAimOverride(true, facingDir);
+                        _mobileAimOverrideActive = true;
+                        aimDir = facingDir;
+                    }
+                    else if (_mobileAimOverrideActive)
+                    {
+                        aim.SetExternalAimOverride(false, Vector2.right);
+                        _mobileAimOverrideActive = false;
+                    }
+                }
+                else if (wantAimAdjust)
                 {
                     var d = aimDir.sqrMagnitude > 0.0001f ? aimDir.normalized : Vector2.right;
-                    var deltaDeg = (up ? 1f : -1f) * 220f * Time.deltaTime;
-                    var rad = deltaDeg * Mathf.Deg2Rad;
-                    var c = Mathf.Cos(rad);
-                    var s = Mathf.Sin(rad);
-                    var rotated = new Vector2(d.x * c - d.y * s, d.x * s + d.y * c);
-                    if (rotated.sqrMagnitude < 0.0001f) rotated = Vector2.right;
-                    aim.SetExternalAimOverride(true, rotated.normalized);
+                    var prevFacingSign = _mobileAimFacingSign;
+                    var facingSign = 1f;
+                    if (wantFacing)
+                    {
+                        facingSign = right ? 1f : -1f;
+                    }
+                    else if (Mathf.Abs(d.x) > 0.15f)
+                    {
+                        facingSign = d.x >= 0f ? 1f : -1f;
+                    }
+                    else
+                    {
+                        facingSign = _mobileAimFacingSign;
+                    }
+
+                    var inputV = 0f;
+                    if (up && !down) inputV = 1f;
+                    else if (down && !up) inputV = -1f;
+
+                    var curDeg = Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg;
+                    curDeg = (curDeg % 360f + 360f) % 360f;
+                    var baseDeg = facingSign >= 0f ? 0f : 180f;
+                    var relDeg = Mathf.DeltaAngle(baseDeg, curDeg);
+                    relDeg = Mathf.Clamp(relDeg, -90f, 90f);
+
+                    // Touch should match keyboard behavior: when changing facing side,
+                    // start from horizon of the new side, then continue in that hemisphere.
+                    if (wantFacing && Mathf.Sign(facingSign) != Mathf.Sign(prevFacingSign))
+                    {
+                        relDeg = 0f;
+                    }
+
+                    relDeg += inputV * facingSign * 220f * Time.deltaTime;
+                    relDeg = Mathf.Clamp(relDeg, -90f, 90f);
+
+                    var outRad = (baseDeg + relDeg) * Mathf.Deg2Rad;
+                    var outDir = new Vector2(Mathf.Cos(outRad), Mathf.Sin(outRad));
+                    if (outDir.sqrMagnitude < 0.0001f)
+                    {
+                        outDir = facingSign >= 0f ? Vector2.right : Vector2.left;
+                    }
+
+                    aim.SetExternalAimOverride(true, outDir.normalized);
+                    _mobileAimFacingSign = facingSign >= 0f ? 1 : -1;
                     _mobileAimOverrideActive = true;
-                    aimDir = rotated.normalized;
+                    aimDir = outDir.normalized;
                 }
                 else if (wantFacing)
                 {
                     var sign = right ? 1f : -1f;
                     var d = aimDir.sqrMagnitude > 0.0001f ? aimDir.normalized : Vector2.right;
-                    d.x = Mathf.Abs(d.x) < 0.15f ? sign : Mathf.Sign(d.x) * sign;
-                    if (d.sqrMagnitude < 0.0001f) d = sign > 0f ? Vector2.right : Vector2.left;
-                    aim.SetExternalAimOverride(true, d.normalized);
+                    var prevSign = _mobileAimFacingSign;
+
+                    Vector2 outDir;
+                    if (Mathf.Sign(sign) != Mathf.Sign(prevSign))
+                    {
+                        // On side switch, reset aim exactly to horizon of new facing side.
+                        outDir = sign > 0f ? Vector2.right : Vector2.left;
+                    }
+                    else
+                    {
+                        // Same side: keep current relative angle inside this hemisphere.
+                        var curDeg = Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg;
+                        curDeg = (curDeg % 360f + 360f) % 360f;
+                        var baseDeg = sign >= 0f ? 0f : 180f;
+                        var relDeg = Mathf.Clamp(Mathf.DeltaAngle(baseDeg, curDeg), -90f, 90f);
+                        var outRad = (baseDeg + relDeg) * Mathf.Deg2Rad;
+                        outDir = new Vector2(Mathf.Cos(outRad), Mathf.Sin(outRad));
+                        if (outDir.sqrMagnitude < 0.0001f) outDir = sign > 0f ? Vector2.right : Vector2.left;
+                    }
+
+                    aim.SetExternalAimOverride(true, outDir.normalized);
+                    _mobileAimFacingSign = sign >= 0f ? 1 : -1;
                     _mobileAimOverrideActive = true;
-                    aimDir = d.normalized;
+                    aimDir = outDir.normalized;
                 }
                 else if (_mobileAimOverrideActive)
                 {
+                    // No touch directional input: release mobile override so keyboard
+                    // up/down aim works immediately (no need to use rope first).
                     aim.SetExternalAimOverride(false, Vector2.right);
                     _mobileAimOverrideActive = false;
                 }
@@ -632,7 +804,6 @@ namespace WormCrawlerPrototype
 
             if (fire && !_mobileFireWasPressed)
             {
-                var grenade = ap.GetComponent<HeroGrenadeThrower>();
                 if (grapple != null && grapple.IsAttached)
                 {
                     if (grenade != null && grenade.Enabled)
@@ -703,6 +874,7 @@ namespace WormCrawlerPrototype
             _mainMenuSelectedIndex = 0;
             _newGameSelectedIndex = 0;
             _recordsSelectedIndex = 0;
+            _menuAnimTime = 0f;
             IsMapMenuOpen = true;
         }
 
@@ -722,263 +894,259 @@ namespace WormCrawlerPrototype
 
         private void DrawMainMenu()
         {
+            EnsureMenuTextures();
+            _menuAnimTime += Time.deltaTime;
+
+            var sw = (float)Screen.width;
+            var sh = (float)Screen.height;
             var mobile = IsMobileUiEnabled();
             var uiScale = Mathf.Max(1f, menuUiScale) * Mathf.Clamp(menuUiScaleFactor, 0.1f, 3f);
-            var windowRect = new Rect(0f, 0f, Screen.width, Screen.height);
 
-            var prevBg = GUI.backgroundColor;
-            GUI.backgroundColor = new Color(0.15f, 0.15f, 0.15f, 1f);
-            GUI.Box(windowRect, "");
-            GUI.backgroundColor = prevBg;
+            // Animated entrance.
+            var t = Mathf.Clamp01(_menuAnimTime * 3.5f);
+            var ease = 1f - (1f - t) * (1f - t);
+            var alpha = ease;
 
-            var pad = (mobile ? 34f : 12f) * uiScale;
-            var topPad = (mobile ? 64f : 34f) * uiScale;
-            var inner = new Rect(windowRect.x + pad, windowRect.y + topPad, windowRect.width - pad * 2f, windowRect.height - (pad + 20f) - topPad);
-            var y = inner.y;
+            // Full-screen dark overlay.
+            var prevColor = GUI.color;
+            GUI.color = new Color(0f, 0f, 0f, alpha * 0.7f);
+            GUI.DrawTexture(new Rect(0f, 0f, sw, sh), Texture2D.whiteTexture);
+            GUI.color = prevColor;
 
-            var prevLabelFont = GUI.skin.label.fontSize;
-            var prevButtonFont = GUI.skin.button.fontSize;
-            var scaledFont = Mathf.RoundToInt(Screen.height * 0.028f * uiScale);
-            GUI.skin.label.fontSize = scaledFont;
-            GUI.skin.button.fontSize = scaledFont;
+            // Panel.
+            var panelW = Mathf.Min(sw * 0.92f, 700f * uiScale);
+            var panelH = Mathf.Min(sh * 0.88f, 600f * uiScale);
+            var panelX = (sw - panelW) * 0.5f;
+            var panelY = Mathf.Lerp((sh - panelH) * 0.5f - 30f, (sh - panelH) * 0.5f, ease);
+            var panelRect = new Rect(panelX, panelY, panelW, panelH);
 
-            var btnPadX = Mathf.Max(10f * uiScale, scaledFont * 0.9f);
-            var btnPadY = Mathf.Max(6f * uiScale, scaledFont * 0.45f);
-            var footerBtnH = Mathf.Max(24f * uiScale, scaledFont + btnPadY * 2f);
+            GUI.color = new Color(1f, 1f, 1f, alpha);
+            if (_menuPanelTex != null) GUI.DrawTexture(panelRect, _menuPanelTex);
 
-            float ButtonW(string label)
-            {
-                var s = GUI.skin.button.CalcSize(new GUIContent(label));
-                return Mathf.Clamp(s.x + btnPadX * 2f, 60f * uiScale, inner.width);
-            }
+            var borderW = Mathf.Max(3f, panelW * 0.005f);
+            var pulse = 0.85f + 0.15f * Mathf.Sin(_menuAnimTime * 3.5f);
+            var borderCol = new Color(0.4f * pulse, 0.7f * pulse, 1f * pulse, alpha * 0.9f);
+            DrawMenuRectBorder(panelRect, borderW, borderCol);
 
-            float ButtonH()
-            {
-                return footerBtnH;
-            }
+            var pad = Mathf.Max(12f, panelW * 0.03f);
+            var btnFontSize = Mathf.Clamp(Mathf.RoundToInt(panelH * 0.042f), 16, 36);
+            var navBtnFontSize = Mathf.Clamp(Mathf.RoundToInt(panelH * 0.055f), 18, 40);
+            var navBtnH = Mathf.Clamp(panelH * 0.12f, 48f, 80f);
+            var navBtnW = Mathf.Max(panelW * 0.28f, 100f);
+            var itemBtnH = Mathf.Clamp(panelH * 0.10f, 40f, 70f);
+            var itemBtnW = Mathf.Clamp(panelW * 0.35f, 100f, 260f);
+            var itemGap = Mathf.Max(8f, pad * 0.5f);
 
-            Rect CenterButtonRect(float y0, string label)
-            {
-                var w = ButtonW(label);
-                var h = ButtonH();
-                var x = inner.x + (inner.width - w) * 0.5f;
-                return new Rect(x, y0, w, h);
-            }
-
-            var footerBtnBackW = ButtonW("Back");
-            var footerBtnNextW = ButtonW("Next");
-            var footerBtnStartW = ButtonW("Start");
-            var footerButtonsY = windowRect.yMax - footerBtnH - Mathf.Max(2f, 4f * uiScale);
+            var navY = panelRect.yMax - navBtnH - pad;
 
             if (_screen == MenuScreen.Main)
             {
-                var gap = (mobile ? 26f : 12f) * uiScale;
+                DrawMenuTitle(panelRect, "Arm Worms", alpha, pad);
 
-                DrawSelectableButton(CenterButtonRect(y, "New Game"), "New Game", _mainMenuSelectedIndex == 0, StartSetupWizard);
-                y += ButtonH() + gap;
-                DrawSelectableButton(CenterButtonRect(y, "Records"), "Records", _mainMenuSelectedIndex == 1, () => _screen = MenuScreen.Records);
-                y += ButtonH() + gap;
-                DrawSelectableButton(CenterButtonRect(y, "Exit"), "Exit", _mainMenuSelectedIndex == 2, ExitGame);
-                GUI.skin.label.fontSize = prevLabelFont;
-                GUI.skin.button.fontSize = prevButtonFont;
+                var gap = Mathf.Max(12f, panelH * 0.04f);
+                var mainBtnW = Mathf.Min(panelW - pad * 2f, 320f * uiScale);
+                var mainBtnH = Mathf.Clamp(panelH * 0.13f, 50f, 80f);
+                var mainBtnX = panelRect.x + (panelW - mainBtnW) * 0.5f;
+                var totalH = mainBtnH * 3f + gap * 2f;
+                var startY = panelRect.y + (panelH - totalH) * 0.5f + panelH * 0.06f;
+
+                var tex0 = _mainMenuSelectedIndex == 0 ? _menuBtnSelectedTex : _menuBtnNormalTex;
+                var tex1 = _mainMenuSelectedIndex == 1 ? _menuBtnSelectedTex : _menuBtnNormalTex;
+                var tex2 = _mainMenuSelectedIndex == 2 ? _menuBtnSelectedTex : _menuBtnNormalTex;
+
+                if (DrawMenuCartoonButton(new Rect(mainBtnX, startY, mainBtnW, mainBtnH), "New Game", tex0, navBtnFontSize, alpha))
+                {
+                    _mainMenuSelectedIndex = 0;
+                    StartSetupWizard();
+                }
+                if (DrawMenuCartoonButton(new Rect(mainBtnX, startY + mainBtnH + gap, mainBtnW, mainBtnH), "Records", tex1, navBtnFontSize, alpha))
+                {
+                    _mainMenuSelectedIndex = 1;
+                    _screen = MenuScreen.Records;
+                }
+                if (DrawMenuCartoonButton(new Rect(mainBtnX, startY + (mainBtnH + gap) * 2f, mainBtnW, mainBtnH), "Exit", tex2, navBtnFontSize, alpha))
+                {
+                    _mainMenuSelectedIndex = 2;
+                    ExitGame();
+                }
+
+                GUI.color = prevColor;
                 return;
             }
 
             if (_screen == MenuScreen.SetupMap)
             {
-                var titleH = (mobile ? 52f : 24f) * uiScale;
-                var titleY = windowRect.y + Mathf.Max(2f, pad * 0.15f);
-                var afterTitleGap = Mathf.Max(4f * 0.5f, 8f * uiScale * 0.5f);
+                DrawMenuTitle(panelRect, "Step 1: Choose Map", alpha, pad);
 
-                var itemH = (mobile ? 46f : 20f) * uiScale * 0.55f;
+                // Horizontal scrollable list of map buttons.
+                var listTop = panelRect.y + pad * 2f + panelH * 0.10f;
+                var listBottom = navY - pad * 0.5f;
+                var listH = Mathf.Max(itemBtnH + 8f, listBottom - listTop);
+                var listCenterY = listTop + (listH - itemBtnH) * 0.5f;
 
-                GUI.Label(new Rect(inner.x, titleY, inner.width, titleH), "Step 1/4: Choose Map");
+                var totalContentW = Mathf.Max(1f, _mapDisplayNames.Count * (itemBtnW + itemGap) - itemGap);
+                var scrollRect = new Rect(panelRect.x + pad, listTop, panelW - pad * 2f, listH);
+                var contentRect = new Rect(0f, 0f, Mathf.Max(scrollRect.width, totalContentW), listH);
 
-                var listTop = titleY + titleH + afterTitleGap;
-                var listBottom = footerButtonsY - Mathf.Max(4f, pad * 0.25f);
-                var listH = Mathf.Max(1f, listBottom - listTop);
-                var scrollRect = new Rect(inner.x, listTop, inner.width, listH);
-                var contentRect = new Rect(0f, 0f, inner.width - 20f, Mathf.Max(listH, _mapDisplayNames.Count * itemH));
-
-                _mapScroll = GUI.BeginScrollView(scrollRect, _mapScroll, contentRect);
+                _mapScroll = GUI.BeginScrollView(scrollRect, _mapScroll, contentRect, true, false);
                 for (var i = 0; i < _mapDisplayNames.Count; i++)
                 {
-                    var r = new Rect(0f, i * itemH, contentRect.width, itemH);
-                    if (i == _selectedMapIndex)
-                    {
-                        var prev = GUI.color;
-                        GUI.color = new Color(0.25f, 0.55f, 1f, 0.35f);
-                        GUI.Box(r, GUIContent.none);
-                        GUI.color = prev;
-                    }
-
-                    GUI.Label(new Rect(r.x + 4f * uiScale, r.y + 1f * uiScale, r.width - 8f * uiScale, r.height - 2f * uiScale), _mapDisplayNames[i]);
-                    if (GUI.Button(r, GUIContent.none, GUIStyle.none))
+                    var bx = i * (itemBtnW + itemGap);
+                    var by = (listH - itemBtnH) * 0.5f;
+                    var br = new Rect(bx, by, itemBtnW, itemBtnH);
+                    var tex = (i == _selectedMapIndex) ? _menuBtnSelectedTex : _menuBtnNormalTex;
+                    if (DrawMenuCartoonButton(br, _mapDisplayNames[i], tex, btnFontSize, alpha, bold: i == _selectedMapIndex))
                     {
                         _selectedMapIndex = i;
                     }
                 }
                 GUI.EndScrollView();
 
-                var buttonsY = footerButtonsY;
-                DrawSelectableButton(new Rect(inner.x, buttonsY, footerBtnBackW, footerBtnH), "Back", selected: false, () => _screen = MenuScreen.Main);
-
-                GUI.enabled = _selectedMapIndex >= 0 && _selectedMapIndex < _mapResourcePaths.Count;
-                DrawSelectableButton(new Rect(inner.xMax - footerBtnNextW, buttonsY, footerBtnNextW, footerBtnH), "Next", selected: false, () =>
+                // Nav buttons.
+                if (DrawMenuCartoonButton(new Rect(panelRect.x + pad, navY, navBtnW, navBtnH), "Back", _menuBtnNormalTex, navBtnFontSize, alpha))
                 {
-                    if (_selectedMapIndex >= 0 && _selectedMapIndex < _mapResourcePaths.Count)
-                    {
-                        SetSelectedTerrain(_mapResourcePaths[_selectedMapIndex]);
-                    }
-                    _screen = MenuScreen.SetupMode;
-                });
-                GUI.enabled = true;
+                    _screen = MenuScreen.Main;
+                }
 
-                GUI.skin.label.fontSize = prevLabelFont;
-                GUI.skin.button.fontSize = prevButtonFont;
+                var canNext = _selectedMapIndex >= 0 && _selectedMapIndex < _mapResourcePaths.Count;
+                var nextTex = canNext ? _menuBtnNavTex : _menuBtnNormalTex;
+                var nextAlpha = canNext ? alpha : alpha * 0.4f;
+                if (DrawMenuCartoonButton(new Rect(panelRect.xMax - pad - navBtnW, navY, navBtnW, navBtnH), "Next", nextTex, navBtnFontSize, nextAlpha) && canNext)
+                {
+                    SetSelectedTerrain(_mapResourcePaths[_selectedMapIndex]);
+                    _screen = MenuScreen.SetupMode;
+                }
+
+                GUI.color = prevColor;
                 return;
             }
 
             if (_screen == MenuScreen.SetupMode)
             {
-                var lineH = (mobile ? 60f : 28f) * uiScale;
-                var gapY = (mobile ? 28f : 14f) * uiScale;
+                DrawMenuTitle(panelRect, "Step 2: Mode", alpha, pad);
 
-                var titleH = (mobile ? 52f : 24f) * uiScale;
-                var titleY = windowRect.y + Mathf.Max(2f, pad * 0.15f);
-                var afterTitleGap = Mathf.Max(4f, 8f * uiScale);
+                // Horizontal row of mode buttons.
+                var modeBtnW = Mathf.Min(panelW * 0.38f, 240f);
+                var modeBtnH = Mathf.Clamp(panelH * 0.14f, 50f, 80f);
+                var modeGap = Mathf.Max(12f, pad * 0.6f);
+                var totalModeW = modeBtnW * 2f + modeGap;
+                var modeX = panelRect.x + (panelW - totalModeW) * 0.5f;
+                var modeY = panelRect.y + panelH * 0.38f;
 
-                GUI.Label(new Rect(inner.x, titleY, inner.width, titleH), "Step 2/4: Mode");
-                y = titleY + titleH + afterTitleGap;
+                var texPlayer = !VsCpu ? _menuBtnSelectedTex : _menuBtnNormalTex;
+                var texCpu = VsCpu ? _menuBtnSelectedTex : _menuBtnNormalTex;
 
-                y += lineH;
-
-                var buttonsY = footerButtonsY;
-                var contentBottom = buttonsY - pad * 0.6f;
-                var modeW = ButtonW("Vs Player");
-                var modeX = inner.x;
-                var btnH = ButtonH();
-                var modeY0 = Mathf.Min(y + gapY, contentBottom - (btnH * 2f + gapY));
-
-                DrawSelectableButton(new Rect(modeX, modeY0, modeW, btnH), "Vs Player", !VsCpu, () =>
+                if (DrawMenuCartoonButton(new Rect(modeX, modeY, modeBtnW, modeBtnH), "Vs Player", texPlayer, btnFontSize, alpha))
                 {
                     VsCpu = false;
                     PlayerPrefs.SetInt(VsCpuPrefKey, 0);
                     PlayerPrefs.Save();
-                });
-
-                DrawSelectableButton(new Rect(modeX, modeY0 + btnH + gapY, modeW, btnH), "Vs CPU", VsCpu, () =>
+                }
+                if (DrawMenuCartoonButton(new Rect(modeX + modeBtnW + modeGap, modeY, modeBtnW, modeBtnH), "Vs CPU", texCpu, btnFontSize, alpha))
                 {
                     VsCpu = true;
                     PlayerPrefs.SetInt(VsCpuPrefKey, 1);
                     PlayerPrefs.Save();
-                });
+                }
 
-                DrawSelectableButton(new Rect(inner.x, buttonsY, footerBtnBackW, footerBtnH), "Back", selected: false, () => _screen = MenuScreen.SetupMap);
-                DrawSelectableButton(new Rect(inner.xMax - footerBtnNextW, buttonsY, footerBtnNextW, footerBtnH), "Next", selected: false, () => _screen = VsCpu ? MenuScreen.SetupDifficulty : MenuScreen.SetupTeamSize);
+                // Nav buttons.
+                if (DrawMenuCartoonButton(new Rect(panelRect.x + pad, navY, navBtnW, navBtnH), "Back", _menuBtnNormalTex, navBtnFontSize, alpha))
+                {
+                    _screen = MenuScreen.SetupMap;
+                }
+                if (DrawMenuCartoonButton(new Rect(panelRect.xMax - pad - navBtnW, navY, navBtnW, navBtnH), "Next", _menuBtnNavTex, navBtnFontSize, alpha))
+                {
+                    _screen = VsCpu ? MenuScreen.SetupDifficulty : MenuScreen.SetupTeamSize;
+                }
 
-                GUI.skin.label.fontSize = prevLabelFont;
-                GUI.skin.button.fontSize = prevButtonFont;
+                GUI.color = prevColor;
                 return;
             }
 
             if (_screen == MenuScreen.SetupDifficulty)
             {
-                var lineH = (mobile ? 60f : 28f) * uiScale;
-                var gapY = (mobile ? 22f : 12f) * uiScale;
+                DrawMenuTitle(panelRect, "Step 3: CPU Difficulty", alpha, pad);
 
-                var titleH = (mobile ? 52f : 24f) * uiScale;
-                var titleY = windowRect.y + Mathf.Max(2f, pad * 0.15f);
-                var afterTitleGap = Mathf.Max(4f, 8f * uiScale);
+                // Horizontal row of difficulty buttons.
+                var diffBtnW = Mathf.Min(panelW * 0.28f, 180f);
+                var diffBtnH = Mathf.Clamp(panelH * 0.13f, 46f, 74f);
+                var diffGap = Mathf.Max(10f, pad * 0.5f);
+                var totalDiffW = diffBtnW * 3f + diffGap * 2f;
+                var diffX = panelRect.x + (panelW - totalDiffW) * 0.5f;
+                var diffY = panelRect.y + panelH * 0.38f;
 
-                GUI.Label(new Rect(inner.x, titleY, inner.width, titleH), "Step 2/4: CPU Difficulty");
-                y = titleY + titleH + afterTitleGap;
+                var texEasy = CpuDifficulty == WormCrawlerPrototype.AI.BotDifficulty.Easy ? _menuBtnSelectedTex : _menuBtnNormalTex;
+                var texNorm = CpuDifficulty == WormCrawlerPrototype.AI.BotDifficulty.Normal ? _menuBtnSelectedTex : _menuBtnNormalTex;
+                var texHard = CpuDifficulty == WormCrawlerPrototype.AI.BotDifficulty.Hard ? _menuBtnSelectedTex : _menuBtnNormalTex;
 
-                GUI.Label(new Rect(inner.x, y, inner.width, (mobile ? 48f : 24f) * uiScale), "Choose difficulty:");
-                y += lineH;
-
-                var w = Mathf.Max(ButtonW("Normal"), Mathf.Max(ButtonW("Easy"), ButtonW("Hard")));
-                var x = inner.x + (inner.width - w) * 0.5f;
-                var btnH = ButtonH();
-                gapY = btnH / 3f;
-
-                var buttonsY = footerButtonsY;
-                var contentBottom = buttonsY - pad * 0.6f;
-                var totalButtonsH = btnH * 3f + gapY * 2f;
-                y = Mathf.Min(y, contentBottom - totalButtonsH);
-
-                DrawSelectableButton(new Rect(x, y, w, btnH), "Easy", CpuDifficulty == WormCrawlerPrototype.AI.BotDifficulty.Easy, () =>
+                if (DrawMenuCartoonButton(new Rect(diffX, diffY, diffBtnW, diffBtnH), "Easy", texEasy, btnFontSize, alpha))
                 {
                     CpuDifficulty = WormCrawlerPrototype.AI.BotDifficulty.Easy;
                     PlayerPrefs.SetInt(CpuDifficultyPrefKey, (int)CpuDifficulty);
                     PlayerPrefs.Save();
-                });
-                y += btnH + gapY;
-
-                DrawSelectableButton(new Rect(x, y, w, btnH), "Normal", CpuDifficulty == WormCrawlerPrototype.AI.BotDifficulty.Normal, () =>
+                }
+                if (DrawMenuCartoonButton(new Rect(diffX + diffBtnW + diffGap, diffY, diffBtnW, diffBtnH), "Normal", texNorm, btnFontSize, alpha))
                 {
                     CpuDifficulty = WormCrawlerPrototype.AI.BotDifficulty.Normal;
                     PlayerPrefs.SetInt(CpuDifficultyPrefKey, (int)CpuDifficulty);
                     PlayerPrefs.Save();
-                });
-                y += btnH + gapY;
-
-                DrawSelectableButton(new Rect(x, y, w, btnH), "Hard", CpuDifficulty == WormCrawlerPrototype.AI.BotDifficulty.Hard, () =>
+                }
+                if (DrawMenuCartoonButton(new Rect(diffX + (diffBtnW + diffGap) * 2f, diffY, diffBtnW, diffBtnH), "Hard", texHard, btnFontSize, alpha))
                 {
                     CpuDifficulty = WormCrawlerPrototype.AI.BotDifficulty.Hard;
                     PlayerPrefs.SetInt(CpuDifficultyPrefKey, (int)CpuDifficulty);
                     PlayerPrefs.Save();
-                });
+                }
 
-                DrawSelectableButton(new Rect(inner.x, buttonsY, footerBtnBackW, footerBtnH), "Back", selected: false, () => _screen = MenuScreen.SetupMode);
-                DrawSelectableButton(new Rect(inner.xMax - footerBtnNextW, buttonsY, footerBtnNextW, footerBtnH), "Next", selected: false, () => _screen = MenuScreen.SetupTeamSize);
+                // Nav buttons.
+                if (DrawMenuCartoonButton(new Rect(panelRect.x + pad, navY, navBtnW, navBtnH), "Back", _menuBtnNormalTex, navBtnFontSize, alpha))
+                {
+                    _screen = MenuScreen.SetupMode;
+                }
+                if (DrawMenuCartoonButton(new Rect(panelRect.xMax - pad - navBtnW, navY, navBtnW, navBtnH), "Next", _menuBtnNavTex, navBtnFontSize, alpha))
+                {
+                    _screen = MenuScreen.SetupTeamSize;
+                }
 
-                GUI.skin.label.fontSize = prevLabelFont;
-                GUI.skin.button.fontSize = prevButtonFont;
+                GUI.color = prevColor;
                 return;
             }
 
             if (_screen == MenuScreen.SetupTeamSize)
             {
-                var lineH = (mobile ? 60f : 28f) * uiScale;
+                var stepLabel = VsCpu ? "Step 4: Team Size" : "Step 3: Team Size";
+                DrawMenuTitle(panelRect, stepLabel, alpha, pad);
 
-                var titleH = (mobile ? 52f : 24f) * uiScale;
-                var titleY = windowRect.y + Mathf.Max(2f, pad * 0.15f);
-                var afterTitleGap = Mathf.Max(4f, 8f * uiScale);
-
-                GUI.Label(new Rect(inner.x, titleY, inner.width, titleH), VsCpu ? "Step 4/4: Team Size" : "Step 3/3: Team Size");
-                y = titleY + titleH + afterTitleGap;
-
-                y += lineH;
-
-                var btnW = Mathf.Max(ButtonW("3x3"), Mathf.Max(ButtonW("1x1"), ButtonW("5x5")));
-                var btnH = ButtonH();
-                var gapX = (mobile ? 18f : 10f) * uiScale;
-                var gapY = (mobile ? 22f : 12f) * uiScale;
-
-                var cols = 3;
-                var gridW = btnW * cols + gapX * (cols - 1);
-                var x0 = inner.x + (inner.width - gridW) * 0.5f;
+                // Horizontal row of team size buttons.
+                var tsBtnW = Mathf.Clamp(panelW * 0.15f, 56f, 120f);
+                var tsBtnH = Mathf.Clamp(panelH * 0.13f, 46f, 74f);
+                var tsGap = Mathf.Max(8f, pad * 0.4f);
+                var totalTsW = tsBtnW * 5f + tsGap * 4f;
+                var tsX = panelRect.x + (panelW - totalTsW) * 0.5f;
+                var tsY = panelRect.y + panelH * 0.38f;
 
                 for (var idx = 0; idx < 5; idx++)
                 {
-                    var s = idx + 1;
-                    var row = idx / cols;
-                    var col = idx % cols;
-                    var r = new Rect(x0 + (btnW + gapX) * col, y + (btnH + gapY) * row, btnW, btnH);
-                    var label = $"{s}x{s}";
-                    var isSelected = SelectedTeamSize == s;
-                    DrawSelectableButton(r, label, isSelected, () =>
+                    var sz = idx + 1;
+                    var label = $"{sz}x{sz}";
+                    var isSel = SelectedTeamSize == sz;
+                    var tex = isSel ? _menuBtnSelectedTex : _menuBtnNormalTex;
+                    if (DrawMenuCartoonButton(new Rect(tsX + (tsBtnW + tsGap) * idx, tsY, tsBtnW, tsBtnH), label, tex, btnFontSize, alpha, bold: isSel))
                     {
-                        SelectedTeamSize = s;
+                        SelectedTeamSize = sz;
                         PlayerPrefs.SetInt(TeamSizePrefKey, SelectedTeamSize);
                         PlayerPrefs.Save();
-                    });
+                    }
                 }
 
-                var buttonsY = footerButtonsY;
-                DrawSelectableButton(new Rect(inner.x, buttonsY, footerBtnBackW, footerBtnH), "Back", selected: false, () => _screen = VsCpu ? MenuScreen.SetupDifficulty : MenuScreen.SetupMode);
-                DrawSelectableButton(new Rect(inner.xMax - footerBtnStartW, buttonsY, footerBtnStartW, footerBtnH), "Start", selected: false, () =>
+                // Nav buttons.
+                if (DrawMenuCartoonButton(new Rect(panelRect.x + pad, navY, navBtnW, navBtnH), "Back", _menuBtnNormalTex, navBtnFontSize, alpha))
+                {
+                    _screen = VsCpu ? MenuScreen.SetupDifficulty : MenuScreen.SetupMode;
+                }
+
+                var startBtnTex = _menuBtnNavTex;
+                if (DrawMenuCartoonButton(new Rect(panelRect.xMax - pad - navBtnW, navY, navBtnW, navBtnH), "Start!", startBtnTex, navBtnFontSize, alpha))
                 {
                     CloseMainMenu();
                     if (_hasPendingScene && !string.IsNullOrEmpty(_pendingScene.path))
@@ -986,36 +1154,52 @@ namespace WormCrawlerPrototype
                         GenerateWorld(_pendingScene);
                         _hasPendingScene = false;
                     }
-                });
+                }
 
-                GUI.skin.label.fontSize = prevLabelFont;
-                GUI.skin.button.fontSize = prevButtonFont;
+                GUI.color = prevColor;
                 return;
             }
 
             if (_screen == MenuScreen.Records)
             {
+                DrawMenuTitle(panelRect, "Records", alpha, pad);
+
                 var total = PlayerPrefs.GetInt("WormCrawler_TotalGames", 0);
                 var w0 = PlayerPrefs.GetInt("WormCrawler_WinsTeam0", 0);
                 var w1 = PlayerPrefs.GetInt("WormCrawler_WinsTeam1", 0);
                 var last = PlayerPrefs.GetString("WormCrawler_LastDuel", "");
 
-                GUI.Label(new Rect(inner.x, y, inner.width, 24f * uiScale), $"Total games: {total}");
-                y += 24f * uiScale;
-                GUI.Label(new Rect(inner.x, y, inner.width, 24f * uiScale), $"Spider wins: {w0}");
-                y += 24f * uiScale;
-                GUI.Label(new Rect(inner.x, y, inner.width, 24f * uiScale), $"Red wins: {w1}");
-                y += 34f * uiScale;
-                GUI.Label(new Rect(inner.x, y, inner.width, 48f * uiScale), $"Last duel: {(string.IsNullOrEmpty(last) ? "-" : last)}");
+                var infoFontSize = Mathf.Clamp(Mathf.RoundToInt(panelH * 0.045f), 14, 32);
+                var infoStyle = new GUIStyle(GUI.skin.label);
+                infoStyle.fontSize = infoFontSize;
+                infoStyle.alignment = TextAnchor.MiddleLeft;
+                infoStyle.wordWrap = true;
 
-                DrawSelectableButton(new Rect(inner.x, footerButtonsY, footerBtnBackW, footerBtnH), "Back", _recordsSelectedIndex == 0, () => _screen = MenuScreen.Main);
-                GUI.skin.label.fontSize = prevLabelFont;
-                GUI.skin.button.fontSize = prevButtonFont;
+                var lineH = infoFontSize * 2.2f;
+                var infoX = panelRect.x + pad * 1.5f;
+                var infoW = panelW - pad * 3f;
+                var infoY = panelRect.y + panelH * 0.22f;
+
+                GUI.color = new Color(1f, 1f, 1f, alpha);
+                GUI.Label(new Rect(infoX, infoY, infoW, lineH), $"Total games: {total}", infoStyle);
+                infoY += lineH;
+                GUI.Label(new Rect(infoX, infoY, infoW, lineH), $"Spider wins: {w0}", infoStyle);
+                infoY += lineH;
+                GUI.Label(new Rect(infoX, infoY, infoW, lineH), $"Red wins: {w1}", infoStyle);
+                infoY += lineH * 1.2f;
+                GUI.Label(new Rect(infoX, infoY, infoW, lineH * 2f), $"Last duel: {(string.IsNullOrEmpty(last) ? "-" : last)}", infoStyle);
+
+                // Nav button.
+                if (DrawMenuCartoonButton(new Rect(panelRect.x + pad, navY, navBtnW, navBtnH), "Back", _menuBtnNormalTex, navBtnFontSize, alpha))
+                {
+                    _screen = MenuScreen.Main;
+                }
+
+                GUI.color = prevColor;
                 return;
             }
 
-            GUI.skin.label.fontSize = prevLabelFont;
-            GUI.skin.button.fontSize = prevButtonFont;
+            GUI.color = prevColor;
         }
 
         private void HandleMainMenuKeyboard()
@@ -1108,6 +1292,94 @@ namespace WormCrawlerPrototype
             {
                 onClick?.Invoke();
             }
+        }
+
+        private void EnsureMenuTextures()
+        {
+            if (_menuPanelTex != null) return;
+
+            _menuPanelTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            _menuPanelTex.SetPixel(0, 0, new Color(0.08f, 0.06f, 0.18f, 0.94f));
+            _menuPanelTex.Apply(false, true);
+
+            _menuBtnNormalTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            _menuBtnNormalTex.SetPixel(0, 0, new Color(0.14f, 0.12f, 0.28f, 0.92f));
+            _menuBtnNormalTex.Apply(false, true);
+
+            _menuBtnSelectedTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            _menuBtnSelectedTex.SetPixel(0, 0, new Color(0.20f, 0.50f, 0.90f, 0.95f));
+            _menuBtnSelectedTex.Apply(false, true);
+
+            _menuBtnNavTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            _menuBtnNavTex.SetPixel(0, 0, new Color(0.15f, 0.75f, 0.25f, 0.95f));
+            _menuBtnNavTex.Apply(false, true);
+        }
+
+        private static void DrawMenuRectBorder(Rect rect, float w, Color col)
+        {
+            var prev = GUI.color;
+            GUI.color = col;
+            var tex = Texture2D.whiteTexture;
+            GUI.DrawTexture(new Rect(rect.x, rect.y, rect.width, w), tex);
+            GUI.DrawTexture(new Rect(rect.x, rect.yMax - w, rect.width, w), tex);
+            GUI.DrawTexture(new Rect(rect.x, rect.y, w, rect.height), tex);
+            GUI.DrawTexture(new Rect(rect.xMax - w, rect.y, w, rect.height), tex);
+            GUI.color = prev;
+        }
+
+        private bool DrawMenuCartoonButton(Rect rect, string label, Texture2D bgTex, int fontSize, float alpha, bool bold = true)
+        {
+            var prevColor = GUI.color;
+
+            GUI.color = new Color(1f, 1f, 1f, alpha);
+            if (bgTex != null)
+            {
+                GUI.DrawTexture(rect, bgTex);
+            }
+
+            var bw = Mathf.Max(2f, rect.width * 0.02f);
+            DrawMenuRectBorder(rect, bw, new Color(1f, 1f, 1f, alpha * 0.6f));
+
+            var style = new GUIStyle(GUI.skin.label);
+            style.alignment = TextAnchor.MiddleCenter;
+            style.fontStyle = bold ? FontStyle.Bold : FontStyle.Normal;
+            style.fontSize = fontSize;
+            style.wordWrap = false;
+            style.clipping = TextClipping.Clip;
+
+            GUI.color = new Color(0f, 0f, 0f, alpha * 0.8f);
+            GUI.Label(new Rect(rect.x + 1f, rect.y + 1f, rect.width, rect.height), label, style);
+
+            GUI.color = new Color(1f, 1f, 1f, alpha);
+            GUI.Label(rect, label, style);
+
+            GUI.color = new Color(1f, 1f, 1f, 0f);
+            var clicked = GUI.Button(rect, GUIContent.none, GUIStyle.none);
+
+            GUI.color = prevColor;
+            return clicked;
+        }
+
+        private void DrawMenuTitle(Rect panelRect, string text, float alpha, float pad)
+        {
+            var titleFontSize = Mathf.Clamp(Mathf.RoundToInt(panelRect.height * 0.06f), 18, 42);
+            var titleStyle = new GUIStyle(GUI.skin.label);
+            titleStyle.alignment = TextAnchor.MiddleCenter;
+            titleStyle.fontStyle = FontStyle.Bold;
+            titleStyle.fontSize = titleFontSize;
+            titleStyle.wordWrap = true;
+
+            var titleH = titleFontSize * 2f;
+            var titleRect = new Rect(panelRect.x + pad, panelRect.y + pad * 0.5f, panelRect.width - pad * 2f, titleH);
+
+            var prevColor = GUI.color;
+            GUI.color = new Color(0f, 0f, 0f, alpha * 0.7f);
+            GUI.Label(new Rect(titleRect.x + 2f, titleRect.y + 2f, titleRect.width, titleRect.height), text, titleStyle);
+
+            var pulse = 0.9f + 0.1f * Mathf.Sin(_menuAnimTime * 2.5f);
+            GUI.color = new Color(pulse, pulse, 1f, alpha);
+            GUI.Label(titleRect, text, titleStyle);
+            GUI.color = prevColor;
         }
 
         private static void ExitGame()
@@ -1421,55 +1693,75 @@ namespace WormCrawlerPrototype
 
         private void DrawPauseMenu()
         {
-            var uiScale = Mathf.Max(1f, menuUiScale);
+            EnsureMenuTextures();
+            _menuAnimTime += Time.deltaTime;
 
-            var prevLabelFont = GUI.skin.label.fontSize;
-            var prevButtonFont = GUI.skin.button.fontSize;
-            GUI.skin.label.fontSize = Mathf.RoundToInt(prevLabelFont * uiScale);
-            GUI.skin.button.fontSize = Mathf.RoundToInt(prevButtonFont * uiScale);
+            var sw = (float)Screen.width;
+            var sh = (float)Screen.height;
+            var uiScale = Mathf.Max(1f, menuUiScale) * Mathf.Clamp(menuUiScaleFactor, 0.1f, 3f);
 
-            var w = Mathf.Min(520f * uiScale, Screen.width - 40f);
-            var h = Mathf.Min(360f * uiScale, Screen.height - 40f);
-            var x = (Screen.width - w) * 0.5f;
-            var y = (Screen.height - h) * 0.5f;
-            var r = new Rect(x, y, w, h);
+            var t = Mathf.Clamp01(_menuAnimTime * 4f);
+            var ease = 1f - (1f - t) * (1f - t);
+            var alpha = ease;
 
-            GUI.Box(new Rect(0f, 0f, Screen.width, Screen.height), GUIContent.none);
-            GUI.Box(r, "Pause");
+            // Full-screen dark overlay.
+            var prevColor = GUI.color;
+            GUI.color = new Color(0f, 0f, 0f, alpha * 0.65f);
+            GUI.DrawTexture(new Rect(0f, 0f, sw, sh), Texture2D.whiteTexture);
+            GUI.color = prevColor;
 
-            var pad = 14f * uiScale;
-            var inner = new Rect(r.x + pad, r.y + pad * 2.2f, r.width - pad * 2f, r.height - pad * 3.0f);
+            // Panel.
+            var panelW = Mathf.Min(sw * 0.75f, 460f * uiScale);
+            var panelH = Mathf.Min(sh * 0.55f, 360f * uiScale);
+            var panelX = (sw - panelW) * 0.5f;
+            var panelY = Mathf.Lerp((sh - panelH) * 0.5f - 30f, (sh - panelH) * 0.5f, ease);
+            var panelRect = new Rect(panelX, panelY, panelW, panelH);
 
-            var btnH = 44f * uiScale;
-            var gap = 12f * uiScale;
-            var yy = inner.y;
+            GUI.color = new Color(1f, 1f, 1f, alpha);
+            if (_menuPanelTex != null) GUI.DrawTexture(panelRect, _menuPanelTex);
 
-            if (GUI.Button(new Rect(inner.x, yy, inner.width, btnH), "Resume"))
+            var borderW = Mathf.Max(3f, panelW * 0.006f);
+            var pulse = 0.85f + 0.15f * Mathf.Sin(_menuAnimTime * 3.5f);
+            var borderCol = new Color(0.4f * pulse, 0.7f * pulse, 1f * pulse, alpha * 0.9f);
+            DrawMenuRectBorder(panelRect, borderW, borderCol);
+
+            var pad = Mathf.Max(12f, panelW * 0.04f);
+            DrawMenuTitle(panelRect, "Pause", alpha, pad);
+
+            var btnFontSize = Mathf.Clamp(Mathf.RoundToInt(panelH * 0.055f), 18, 40);
+            var btnW = Mathf.Min(panelW - pad * 2f, 300f * uiScale);
+            var btnH = Mathf.Clamp(panelH * 0.15f, 48f, 80f);
+            var gap = Mathf.Max(10f, panelH * 0.04f);
+            var totalBtnsH = btnH * 3f + gap * 2f;
+            var btnX = panelRect.x + (panelW - btnW) * 0.5f;
+            var btnY = panelRect.y + (panelH - totalBtnsH) * 0.5f + panelH * 0.08f;
+
+            if (DrawMenuCartoonButton(new Rect(btnX, btnY, btnW, btnH), "Resume", _menuBtnNavTex, btnFontSize, alpha))
             {
                 _showPauseMenu = false;
                 IsMapMenuOpen = false;
             }
-            yy += btnH + gap;
+            btnY += btnH + gap;
 
-            if (GUI.Button(new Rect(inner.x, yy, inner.width, btnH), "Restart"))
+            if (DrawMenuCartoonButton(new Rect(btnX, btnY, btnW, btnH), "Restart", _menuBtnNormalTex, btnFontSize, alpha))
             {
                 _showPauseMenu = false;
                 IsMapMenuOpen = false;
                 RestartMatch();
             }
-            yy += btnH + gap;
+            btnY += btnH + gap;
 
-            if (GUI.Button(new Rect(inner.x, yy, inner.width, btnH), "Main Menu"))
+            if (DrawMenuCartoonButton(new Rect(btnX, btnY, btnW, btnH), "Main Menu", _menuBtnNormalTex, btnFontSize, alpha))
             {
                 _showPauseMenu = false;
                 _showMainMenu = true;
                 _screen = MenuScreen.Main;
                 _mainMenuSelectedIndex = 0;
+                _menuAnimTime = 0f;
                 IsMapMenuOpen = true;
             }
 
-            GUI.skin.label.fontSize = prevLabelFont;
-            GUI.skin.button.fontSize = prevButtonFont;
+            GUI.color = prevColor;
         }
 
         private void LateUpdate()

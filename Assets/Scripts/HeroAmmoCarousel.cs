@@ -280,7 +280,7 @@ namespace WormCrawlerPrototype
             var tpRect = new Rect(x0 + (iconSize + gap) * 3f, y0, iconSize, iconSize);
 
             DrawHudIconButton(ropeRect, _ropeIcon, AmmoSlot.Rope);
-            DrawHudIconButton(grenadeRect, _grenadeIcon, AmmoSlot.Grenade);
+            DrawGrenadeHudIconButton(grenadeRect, AmmoSlot.Grenade);
             DrawClawGunHudIconButton(clawRect, AmmoSlot.ClawGun);
             DrawHudIconButton(tpRect, _teleportIcon, AmmoSlot.Teleport);
         }
@@ -329,6 +329,64 @@ namespace WormCrawlerPrototype
             DrawIconBorder(rect, selected, canSelect);
 
             GUI.color = prevColor;
+            GUI.enabled = prevEnabled;
+
+            if (clicked)
+            {
+                _selected = CoerceSelection(slot);
+                ApplySelection();
+            }
+        }
+
+        private void DrawGrenadeHudIconButton(Rect rect, AmmoSlot slot)
+        {
+            var canSelect = CoerceSelection(slot) == slot;
+            var selected = _selected == slot;
+
+            var prevEnabled = GUI.enabled;
+            GUI.enabled = canSelect;
+
+            var prev = GUI.color;
+            GUI.color = selected ? new Color(1f, 1f, 1f, 1f) : new Color(1f, 1f, 1f, canSelect ? 0.60f : 0.25f);
+
+            var clicked = GUI.Button(rect, GUIContent.none, GUIStyle.none);
+            if (_grenadeIcon != null)
+            {
+                GUI.DrawTexture(rect, _grenadeIcon, ScaleMode.ScaleToFit, alphaBlend: true);
+            }
+            else
+            {
+                GUI.Label(rect, "G");
+            }
+
+            if (_grenade != null)
+            {
+                var n = Mathf.Max(0, _grenade.GrenadesLeft);
+                var fontSize = Mathf.Clamp(Mathf.RoundToInt(rect.height * 0.28f), 12, 24);
+                var labelH = fontSize * 1.3f;
+                var labelW = rect.width * 0.55f;
+                var labelRect = new Rect(rect.xMax - labelW - 2f, rect.y + 2f, labelW, labelH);
+
+                var style = new GUIStyle(GUI.skin.label);
+                style.alignment = TextAnchor.UpperRight;
+                style.fontStyle = FontStyle.Bold;
+                style.fontSize = fontSize;
+
+                var text = n.ToString();
+                var shadow = new Color(0f, 0f, 0f, 0.90f);
+                var main = selected ? new Color(1f, 1f, 0.3f, 1f) : new Color(1f, 1f, 0.3f, canSelect ? 0.90f : 0.45f);
+
+                var prevColor2 = GUI.color;
+                GUI.color = shadow;
+                GUI.Label(new Rect(labelRect.x + 1f, labelRect.y + 1f, labelRect.width, labelRect.height), text, style);
+                GUI.color = main;
+                GUI.Label(labelRect, text, style);
+                GUI.color = prevColor2;
+            }
+
+            DrawIconBorder(rect, selected, canSelect);
+
+            GUI.color = prev;
             GUI.enabled = prevEnabled;
 
             if (clicked)

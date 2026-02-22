@@ -313,9 +313,9 @@ namespace WormCrawlerPrototype
         {
             SimpleWorldGenerator gen;
 #if UNITY_6000_0_OR_NEWER
-            gen = Object.FindFirstObjectByType<SimpleWorldGenerator>();
+            gen = UnityEngine.Object.FindFirstObjectByType<SimpleWorldGenerator>();
 #else
-            gen = Object.FindObjectOfType<SimpleWorldGenerator>();
+            gen = UnityEngine.Object.FindObjectOfType<SimpleWorldGenerator>();
 #endif
             if (gen == null)
             {
