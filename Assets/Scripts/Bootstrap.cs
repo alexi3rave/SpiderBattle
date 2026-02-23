@@ -25,6 +25,7 @@ namespace WormCrawlerPrototype
         private const string VsCpuPrefKey = "WormCrawler_VsCpu";
         private const string CpuDifficultyPrefKey = "WormCrawler_CpuDifficulty";
         private const string LevelsResourcesRoot = "Levels";
+        private const string MenuGameTitle = "ГРОНvsГАТА: ПАУКАЛИПСИС";
 
         private SimpleWorldGenerator _generator;
         private Transform _hero;
@@ -47,6 +48,9 @@ namespace WormCrawlerPrototype
         [SerializeField] private float touchFireXOffset = -1000f;
         [SerializeField] private float touchDpadXOffset = 1000f;
         [SerializeField] private bool logTouchLayout;
+        [SerializeField] private string loadingPictureResourcesPath = "loadPicture";
+        [SerializeField] private float startupLoadingMinSeconds = 2f;
+        [SerializeField] private float loadingMinSeconds = 2f;
 
         private GUIStyle _mobileButtonStyle;
         private GUIStyle _mobileButtonPressedStyle;
@@ -55,6 +59,10 @@ namespace WormCrawlerPrototype
         private Texture2D _touchCirclePressedTex;
         private Texture2D _touchCircleRingTex;
         private Texture2D _touchCircleRingFireTex;
+        private Texture2D _loadingPictureTex;
+
+        private bool _showLoadingSplash;
+        private float _loadingHideAtRealtime;
 
         private string _selectedTerrain;
 
@@ -178,6 +186,7 @@ namespace WormCrawlerPrototype
             VsCpu = PlayerPrefs.GetInt(VsCpuPrefKey, 0) != 0;
             CpuDifficulty = (WormCrawlerPrototype.AI.BotDifficulty)Mathf.Clamp(PlayerPrefs.GetInt(CpuDifficultyPrefKey, 1), 0, 2);
             RefreshMapList();
+            BeginLoadingSplash(startupLoadingMinSeconds);
 
             var s = SceneManager.GetActiveScene();
             Debug.Log($"[Stage1] Bootstrap.Start activeScene='{s.name}' path='{s.path}'");
@@ -229,6 +238,8 @@ namespace WormCrawlerPrototype
 
         private void Update()
         {
+            UpdateLoadingSplashState();
+
             if (_showMainMenu || _showMapMenu)
             {
                 if (_showMapMenu) HandleMapMenuKeyboard();
@@ -335,6 +346,17 @@ namespace WormCrawlerPrototype
         {
             EnsureMobileGuiStyles();
 
+            var drawBackgroundImage = _showLoadingSplash || _showMapMenu || _showPauseMenu || _showMainMenu;
+            if (drawBackgroundImage)
+            {
+                DrawLoadingBackgroundImage();
+            }
+
+            if (_showLoadingSplash)
+            {
+                return;
+            }
+
             if (_showMapMenu)
             {
                 DrawMapMenu();
@@ -365,6 +387,58 @@ namespace WormCrawlerPrototype
             if (Application.isMobilePlatform) return true;
             if (showTouchControlsOnDesktop) return true;
             return Touchscreen.current != null;
+        }
+
+        private void BeginLoadingSplash(float minSeconds)
+        {
+            _showLoadingSplash = true;
+            var hideAt = Time.realtimeSinceStartup + Mathf.Max(0f, minSeconds);
+            _loadingHideAtRealtime = Mathf.Max(_loadingHideAtRealtime, hideAt);
+        }
+
+        private void UpdateLoadingSplashState()
+        {
+            if (!_showLoadingSplash)
+            {
+                return;
+            }
+
+            if (Time.realtimeSinceStartup >= _loadingHideAtRealtime)
+            {
+                _showLoadingSplash = false;
+            }
+        }
+
+        private void EnsureLoadingBackgroundTexture()
+        {
+            if (_loadingPictureTex != null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(loadingPictureResourcesPath))
+            {
+                _loadingPictureTex = Resources.Load<Texture2D>(loadingPictureResourcesPath);
+            }
+
+            if (_loadingPictureTex == null)
+            {
+                _loadingPictureTex = Resources.Load<Texture2D>("Levels/island_sky");
+            }
+        }
+
+        private void DrawLoadingBackgroundImage()
+        {
+            EnsureLoadingBackgroundTexture();
+            if (_loadingPictureTex == null)
+            {
+                return;
+            }
+
+            var prevColor = GUI.color;
+            GUI.color = Color.white;
+            GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), _loadingPictureTex, ScaleMode.ScaleAndCrop);
+            GUI.color = prevColor;
         }
 
         private void EnsureMobileGuiStyles()
@@ -496,9 +570,9 @@ namespace WormCrawlerPrototype
             var s = Mathf.Min(sx, sy);
 
             const float marginPx = 8f;
-            var fireSizePx = 340f * s;
-            var dPadBtnPx = 190f * s;
-            var dPadGapPx = 54f * s;
+            var fireSizePx = 510f * s;
+            var dPadBtnPx = 285f * s;
+            var dPadGapPx = 81f * s;
 
             var hudFont = Mathf.Clamp(Mathf.RoundToInt(Screen.height * 0.032f), 18, 44);
             var hudPad = Mathf.Max(10f, hudFont * 0.4f);
@@ -535,6 +609,8 @@ namespace WormCrawlerPrototype
             var keyDown = mirrorKeyboard && kb != null && (kb.downArrowKey.isPressed || kb.sKey.isPressed);
             var keyFire = mirrorKeyboard && kb != null && (kb.spaceKey.isPressed || kb.enterKey.isPressed);
 
+            _mobileFireRect = fireRect;
+            _mobileFireTouchHeld = IsTouchInsideRect(fireRect);
             var pressedFire = DrawRoundMobileButton(fireRect, string.Empty, keyFire, repeat: true, ringTex: _touchCircleRingFireTex);
             var pressedUp = DrawRoundMobileButton(upRect, string.Empty, keyUp, repeat: true, arrowDirection: Vector2.up);
             var pressedLeft = DrawRoundMobileButton(leftRect, string.Empty, keyLeft, repeat: true, arrowDirection: Vector2.left);
@@ -543,7 +619,8 @@ namespace WormCrawlerPrototype
 
             if (Event.current.type == EventType.Repaint)
             {
-                ApplyMobileInputs(ap, pressedLeft || keyLeft, pressedRight || keyRight, pressedUp || keyUp, pressedDown || keyDown, pressedFire || keyFire);
+                var fireHeld = pressedFire || keyFire || _mobileFireTouchHeld;
+                ApplyMobileInputs(ap, pressedLeft || keyLeft, pressedRight || keyRight, pressedUp || keyUp, pressedDown || keyDown, fireHeld);
             }
         }
 
@@ -634,7 +711,23 @@ namespace WormCrawlerPrototype
             GUI.matrix = prevMatrix;
         }
 
+        private static bool IsTouchInsideRect(Rect guiRect)
+        {
+            var ts = Touchscreen.current;
+            if (ts == null) return false;
+            foreach (var touch in ts.touches)
+            {
+                if (!touch.press.isPressed) continue;
+                var tp = touch.position.ReadValue();
+                var guiPos = new Vector2(tp.x, Screen.height - tp.y);
+                if (guiRect.Contains(guiPos)) return true;
+            }
+            return false;
+        }
+
         private bool _mobileFireWasPressed;
+        private Rect _mobileFireRect;
+        private bool _mobileFireTouchHeld;
         private bool _mobileAimOverrideActive;
         private int _mobileAimOverridePlayerInstanceId;
         private int _mobileAimFacingSign = 1;
@@ -795,10 +888,9 @@ namespace WormCrawlerPrototype
                 }
                 else if (_mobileAimOverrideActive)
                 {
-                    // No touch directional input: release mobile override so keyboard
-                    // up/down aim works immediately (no need to use rope first).
-                    aim.SetExternalAimOverride(false, Vector2.right);
-                    _mobileAimOverrideActive = false;
+                    // No touch directional input: keep override active with the last
+                    // aim direction so the reticle stays where the player left it
+                    // instead of snapping back to horizon.
                 }
             }
 
@@ -909,7 +1001,7 @@ namespace WormCrawlerPrototype
 
             // Full-screen dark overlay.
             var prevColor = GUI.color;
-            GUI.color = new Color(0f, 0f, 0f, alpha * 0.7f);
+            GUI.color = new Color(0f, 0f, 0f, alpha * 0.5f);
             GUI.DrawTexture(new Rect(0f, 0f, sw, sh), Texture2D.whiteTexture);
             GUI.color = prevColor;
 
@@ -941,7 +1033,7 @@ namespace WormCrawlerPrototype
 
             if (_screen == MenuScreen.Main)
             {
-                DrawMenuTitle(panelRect, "Arm Worms", alpha, pad);
+                DrawMenuTitle(panelRect, "Main Menu", alpha, pad);
 
                 var gap = Mathf.Max(12f, panelH * 0.04f);
                 var mainBtnW = Mathf.Min(panelW - pad * 2f, 320f * uiScale);
@@ -1299,7 +1391,7 @@ namespace WormCrawlerPrototype
             if (_menuPanelTex != null) return;
 
             _menuPanelTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
-            _menuPanelTex.SetPixel(0, 0, new Color(0.08f, 0.06f, 0.18f, 0.94f));
+            _menuPanelTex.SetPixel(0, 0, new Color(0.08f, 0.06f, 0.18f, 0.5f));
             _menuPanelTex.Apply(false, true);
 
             _menuBtnNormalTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
@@ -1362,23 +1454,46 @@ namespace WormCrawlerPrototype
 
         private void DrawMenuTitle(Rect panelRect, string text, float alpha, float pad)
         {
-            var titleFontSize = Mathf.Clamp(Mathf.RoundToInt(panelRect.height * 0.06f), 18, 42);
-            var titleStyle = new GUIStyle(GUI.skin.label);
-            titleStyle.alignment = TextAnchor.MiddleCenter;
-            titleStyle.fontStyle = FontStyle.Bold;
-            titleStyle.fontSize = titleFontSize;
-            titleStyle.wordWrap = true;
+            var gameFontSize = Mathf.Clamp(Mathf.RoundToInt(panelRect.height * 0.075f), 24, 58);
+            var stepFontSize = Mathf.Clamp(Mathf.RoundToInt(panelRect.height * 0.032f), 14, 24);
 
-            var titleH = titleFontSize * 2f;
-            var titleRect = new Rect(panelRect.x + pad, panelRect.y + pad * 0.5f, panelRect.width - pad * 2f, titleH);
+            var gameStyle = new GUIStyle(GUI.skin.label);
+            gameStyle.alignment = TextAnchor.MiddleCenter;
+            gameStyle.fontStyle = FontStyle.Bold;
+            gameStyle.fontSize = gameFontSize;
+            gameStyle.wordWrap = true;
+
+            var stepStyle = new GUIStyle(GUI.skin.label);
+            stepStyle.alignment = TextAnchor.MiddleCenter;
+            stepStyle.fontStyle = FontStyle.Bold;
+            stepStyle.fontSize = stepFontSize;
+            stepStyle.wordWrap = true;
+
+            var gameH = gameFontSize * 1.55f;
+            var gameRect = new Rect(panelRect.x + pad, panelRect.y + pad * 0.20f, panelRect.width - pad * 2f, gameH);
+            var stepRect = new Rect(panelRect.x + pad, gameRect.yMax - gameFontSize * 0.12f, panelRect.width - pad * 2f, stepFontSize * 1.8f);
 
             var prevColor = GUI.color;
-            GUI.color = new Color(0f, 0f, 0f, alpha * 0.7f);
-            GUI.Label(new Rect(titleRect.x + 2f, titleRect.y + 2f, titleRect.width, titleRect.height), text, titleStyle);
+            var pulse = 0.85f + 0.15f * Mathf.Sin(_menuAnimTime * 3.6f);
+            var wobble = 1.2f * Mathf.Sin(_menuAnimTime * 2.1f);
+            var glowCol = new Color(0.12f * pulse, 0.75f * pulse, 1f, alpha * 0.78f);
 
-            var pulse = 0.9f + 0.1f * Mathf.Sin(_menuAnimTime * 2.5f);
-            GUI.color = new Color(pulse, pulse, 1f, alpha);
-            GUI.Label(titleRect, text, titleStyle);
+            // Cartoon glow/outline layers.
+            GUI.color = glowCol;
+            GUI.Label(new Rect(gameRect.x - 2f, gameRect.y + 1f, gameRect.width, gameRect.height), MenuGameTitle, gameStyle);
+            GUI.Label(new Rect(gameRect.x + 2f, gameRect.y + 1f, gameRect.width, gameRect.height), MenuGameTitle, gameStyle);
+            GUI.Label(new Rect(gameRect.x, gameRect.y - 1f, gameRect.width, gameRect.height), MenuGameTitle, gameStyle);
+            GUI.Label(new Rect(gameRect.x, gameRect.y + 3f, gameRect.width, gameRect.height), MenuGameTitle, gameStyle);
+
+            // Main bright title with subtle vertical animation.
+            GUI.color = new Color(1f, 0.98f, 0.86f, alpha);
+            GUI.Label(new Rect(gameRect.x, gameRect.y + wobble, gameRect.width, gameRect.height), MenuGameTitle, gameStyle);
+
+            // Step title (small subtitle).
+            GUI.color = new Color(0f, 0f, 0f, alpha * 0.65f);
+            GUI.Label(new Rect(stepRect.x + 1f, stepRect.y + 1f, stepRect.width, stepRect.height), text, stepStyle);
+            GUI.color = new Color(0.92f, 0.96f, 1f, alpha * 0.95f);
+            GUI.Label(stepRect, text, stepStyle);
             GUI.color = prevColor;
         }
 
@@ -1426,11 +1541,6 @@ namespace WormCrawlerPrototype
                     continue;
                 }
 
-                if (!name.StartsWith("terrain", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
                 _mapResourcePaths.Add($"{LevelsResourcesRoot}/{name}");
                 _mapDisplayNames.Add(name);
             }
@@ -1441,7 +1551,7 @@ namespace WormCrawlerPrototype
                 {
                     for (var j = i + 1; j < _mapDisplayNames.Count; j++)
                     {
-                        if (string.Compare(_mapDisplayNames[i], _mapDisplayNames[j], StringComparison.OrdinalIgnoreCase) > 0)
+                        if (string.Compare(_mapDisplayNames[i], _mapDisplayNames[j], StringComparison.CurrentCultureIgnoreCase) > 0)
                         {
                             (_mapDisplayNames[i], _mapDisplayNames[j]) = (_mapDisplayNames[j], _mapDisplayNames[i]);
                             (_mapResourcePaths[i], _mapResourcePaths[j]) = (_mapResourcePaths[j], _mapResourcePaths[i]);
@@ -1492,9 +1602,14 @@ namespace WormCrawlerPrototype
             var windowY = (Screen.height - windowH) * 0.5f;
             var windowRect = new Rect(windowX, windowY, windowW, windowH);
 
-            GUI.Box(windowRect, "Select map");
+            GUI.color = new Color(1f, 1f, 1f, 0.5f);
+            GUI.Box(windowRect, GUIContent.none);
+            GUI.color = Color.white;
 
-            var inner = new Rect(windowRect.x + 10f * uiScale, windowRect.y + 30f * uiScale, windowRect.width - 20f * uiScale, windowRect.height - 40f * uiScale);
+            var mapPad = Mathf.Max(10f, windowRect.width * 0.03f);
+            DrawMenuTitle(windowRect, "Select map", 1f, mapPad);
+
+            var inner = new Rect(windowRect.x + 10f * uiScale, windowRect.y + 92f * uiScale, windowRect.width - 20f * uiScale, windowRect.height - 102f * uiScale);
             var listRect = new Rect(inner.x, inner.y, inner.width, inner.height - 50f);
 
             var itemH = 24f * uiScale;
@@ -1706,7 +1821,7 @@ namespace WormCrawlerPrototype
 
             // Full-screen dark overlay.
             var prevColor = GUI.color;
-            GUI.color = new Color(0f, 0f, 0f, alpha * 0.65f);
+            GUI.color = new Color(0f, 0f, 0f, alpha * 0.5f);
             GUI.DrawTexture(new Rect(0f, 0f, sw, sh), Texture2D.whiteTexture);
             GUI.color = prevColor;
 
@@ -1812,6 +1927,7 @@ namespace WormCrawlerPrototype
 
         private void GenerateWorld(Scene targetScene)
         {
+            BeginLoadingSplash(loadingMinSeconds);
             var seed = unchecked((int)DateTime.Now.Ticks);
 
             Debug.Log($"[Stage1] GenerateWorld targetScene='{targetScene.name}' path='{targetScene.path}' seed={seed}");

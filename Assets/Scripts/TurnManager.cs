@@ -1519,17 +1519,21 @@ namespace WormCrawlerPrototype
                     }
                 }
 
-                var world = (Vector2)t.position + Vector2.up * 1.6f;
+                var world = (Vector2)t.position + Vector2.up * 2.25f;
                 var sp = cam.WorldToScreenPoint(new Vector3(world.x, world.y, 0f));
                 if (sp.z < 0f) continue;
 
-                var w = 180f;
-                var h = 36f;
-                var r = new Rect(sp.x - w * 0.5f, Screen.height - sp.y - h, w, h);
+                var w = 360f;
+                var h = 72f;
+                var r = new Rect(sp.x - w * 0.5f, Screen.height - sp.y - h - 10f, w, h);
+
+                var style = new GUIStyle(GUI.skin.label);
+                style.alignment = TextAnchor.MiddleCenter;
+                style.fontSize = Mathf.Clamp(Mathf.RoundToInt(h * 0.28f), 14, 64);
 
                 var prev = GUI.color;
                 GUI.color = i == _activeIndex ? new Color(1f, 1f, 1f, 1f) : new Color(1f, 1f, 1f, 0.6f);
-                GUI.Label(r, $"{name}\nHP: {hp}");
+                GUI.Label(r, $"{name}\nHP: {hp}", style);
                 GUI.color = prev;
             }
 

@@ -15,6 +15,15 @@ namespace WormCrawlerPrototype
         [SerializeField] private bool stopAtVerticalUnlessTurned = true;
 
         [SerializeField] private bool showReticle = true;
+        public bool ShowReticle
+        {
+            get => showReticle;
+            set
+            {
+                showReticle = value;
+                if (!showReticle && _reticle != null) _reticle.gameObject.SetActive(false);
+            }
+        }
         [SerializeField] private Color reticleColor = new Color(1f, 0.9f, 0.1f, 0.95f);
         [SerializeField] private float reticleWorldSize = 0.9f;
 

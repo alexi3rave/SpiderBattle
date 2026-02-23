@@ -179,6 +179,7 @@ namespace WormCrawlerPrototype
             if (_aim != null)
             {
                 _aim.SetAimClampEnabled(clawSelected, 60f);
+                _aim.ShowReticle = !clawSelected;
             }
 
             if (_grapple != null)
@@ -254,9 +255,8 @@ namespace WormCrawlerPrototype
             var hudH = Mathf.Max(28f, hudFont * 1.35f);
             var pad = Mathf.Max(10f, hudFont * 0.4f);
 
-            // Make icons 1.5x smaller than previous (was 44*3, 14*3, 12*3).
-            var iconSize = 44f * 2f;
-            var gap = 14f * 2f;
+            var iconSize = 44f * 3f;
+            var gap = 14f * 3f;
 
             var leftRect = new Rect(pad, pad, Screen.width * 0.33f, hudH);
             var rightRect = new Rect(Screen.width - pad - Screen.width * 0.33f, pad, Screen.width * 0.33f, hudH);

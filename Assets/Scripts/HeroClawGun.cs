@@ -1,4 +1,3 @@
-using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -40,23 +39,14 @@ namespace WormCrawlerPrototype
                 return false;
             }
 
-            if (_turn == null)
+            if (_turn != null)
             {
-#if UNITY_6000_0_OR_NEWER
-                _turn = Object.FindFirstObjectByType<TurnManager>();
-#else
-                _turn = Object.FindObjectOfType<TurnManager>();
-#endif
-            }
-
-            var needConsumeShot = !_firedSincePress;
-            if (_turn != null && needConsumeShot)
-            {
-                if (!_turn.TryConsumeShot(TurnManager.TurnWeapon.ClawGun))
+                if (!_turn.CanSelectWeapon(TurnManager.TurnWeapon.ClawGun))
                 {
-                    if (debugLogs) Debug.Log($"[ClawGun] Blocked by TurnManager.TryConsumeShot (ropeOnly/shotUsed/locked): ({name})");
+                    if (debugLogs) Debug.Log($"[ClawGun] Blocked by TurnManager.CanSelectWeapon (ropeOnly/shotUsed/locked): ({name})");
                     return false;
                 }
+                _turn.NotifyWeaponSelected(TurnManager.TurnWeapon.ClawGun);
             }
 
             var ammoBefore = shotsLeft;
@@ -93,26 +83,27 @@ namespace WormCrawlerPrototype
 
         [Header("Firing")]
         [SerializeField] private float shotsPerSecond = 2f;
-        [SerializeField] private float clawGunEscapeCountdownDelaySeconds = 5f;
         [SerializeField] private float fireAnimationFps = 24f;
         [SerializeField] private int impactOnFrameIndex = 5;
         [SerializeField] private float bulletRange = 25f;
-        [SerializeField] private float bulletExplosionRadiusHeroHeights = 0.35f;
-        [SerializeField] private float bulletCraterRadiusHeroHeights = 0.575f;
+        [SerializeField] private float bulletExplosionRadiusHeroHeights = 0.575f;
 
         [SerializeField] private bool scaleRangeFromGrenade = true;
         [SerializeField] private float bulletRangeAsGrenadeRangeMultiplier = 1.5f;
 
         [Header("Aim Line")]
-        [SerializeField] private bool showAimLine = true;
+        [SerializeField] private bool showAimLine = false;
         [SerializeField] private float aimLineWidth = 0.05f;
         [SerializeField] private Color aimLineColor = new Color(0.95f, 0.95f, 0.95f, 0.55f);
+
+        [Header("Fancy Aim Line")]
+        [SerializeField] private bool useFancyAimLine = true;
 
         [SerializeField] private float fireDirectionDownOffsetDeg = 10f;
 
         [Header("Ammo")]
-        [SerializeField] private int maxShots = 40;
-        [SerializeField] private int shotsLeft = 40;
+        [SerializeField] private int maxShots = 25;
+        [SerializeField] private int shotsLeft = 25;
 
         public int ShotsLeft => shotsLeft;
 
@@ -157,6 +148,12 @@ namespace WormCrawlerPrototype
         private SpriteRenderer _weaponSr;
 
         private LineRenderer _aimLine;
+        private AimLineVisual2D _fancyAimLine;
+
+        public Vector2 AimLineOrigin { get; private set; }
+        public Vector2 AimLineEnd { get; private set; }
+        public Vector2 AimLineDirection { get; private set; }
+        public bool AimLineActive { get; private set; }
 
         private Texture2D _sheetTex;
         private Sprite[] _frameSprites;
@@ -172,8 +169,6 @@ namespace WormCrawlerPrototype
         private bool _mouseHoldActive;
         private bool _externalHoldActive;
         private bool _prevAnyHold;
-        private float _holdStartedAt = -1f;
-        private Coroutine _pendingReleaseNotifyRoutine;
 
         private bool _animActive;
         private float _animT;
@@ -294,15 +289,7 @@ namespace WormCrawlerPrototype
 
         public void ForceStop()
         {
-            CancelPendingClawReleaseNotify();
             _held = false;
-            _keyboardHoldActive = false;
-            _mouseHoldActive = false;
-            _externalHoldActive = false;
-            _prevAnyHold = false;
-            _holdStartedAt = -1f;
-            _firedSincePress = false;
-            _disableAfterShot = false;
             Enabled = false;
             _animActive = false;
             _impactApplied = false;
@@ -315,9 +302,7 @@ namespace WormCrawlerPrototype
         {
             if (!InputEnabled) return;
             if (!Enabled) return;
-            CancelPendingClawReleaseNotify();
             _held = true;
-            _holdStartedAt = Time.time;
             _firedSincePress = false;
             _nextShotTime = Mathf.Min(_nextShotTime, Time.time);
             if (debugLogs) Debug.Log($"[ClawGun] OnShootStarted: Enabled={Enabled} InputEnabled={InputEnabled} held={_held} ({name})");
@@ -363,92 +348,10 @@ namespace WormCrawlerPrototype
                 {
                     if (_firedSincePress)
                     {
-                        NotifyClawGunReleasedWithDelay();
+                        _turn.NotifyClawGunReleased();
                     }
                 }
             }
-        }
-
-        private void CancelPendingClawReleaseNotify()
-        {
-            if (_pendingReleaseNotifyRoutine != null)
-            {
-                StopCoroutine(_pendingReleaseNotifyRoutine);
-                _pendingReleaseNotifyRoutine = null;
-            }
-        }
-
-        private void NotifyClawGunReleasedWithDelay()
-        {
-            if (!_firedSincePress)
-            {
-                return;
-            }
-
-            if (_turn == null)
-            {
-#if UNITY_6000_0_OR_NEWER
-                _turn = Object.FindFirstObjectByType<TurnManager>();
-#else
-                _turn = Object.FindObjectOfType<TurnManager>();
-#endif
-            }
-
-            if (_turn == null)
-            {
-                return;
-            }
-
-            var threshold = Mathf.Max(0f, clawGunEscapeCountdownDelaySeconds);
-            var heldFor = _holdStartedAt >= 0f ? Mathf.Max(0f, Time.time - _holdStartedAt) : threshold;
-            var delay = Mathf.Max(0f, threshold - heldFor);
-
-            CancelPendingClawReleaseNotify();
-            if (delay <= 0.0001f)
-            {
-                _turn.NotifyClawGunReleased();
-                return;
-            }
-
-            _pendingReleaseNotifyRoutine = StartCoroutine(NotifyClawGunReleasedDelayed(delay));
-        }
-
-        private IEnumerator NotifyClawGunReleasedDelayed(float delay)
-        {
-            if (delay > 0f)
-            {
-                yield return new WaitForSeconds(delay);
-            }
-
-            _pendingReleaseNotifyRoutine = null;
-
-            if (_turn == null)
-            {
-#if UNITY_6000_0_OR_NEWER
-                _turn = Object.FindFirstObjectByType<TurnManager>();
-#else
-                _turn = Object.FindObjectOfType<TurnManager>();
-#endif
-            }
-
-            if (_turn == null)
-            {
-                yield break;
-            }
-
-            var ap = _turn.ActivePlayer;
-            if (ap == null)
-            {
-                yield break;
-            }
-
-            var sameHero = ap == transform || transform.IsChildOf(ap) || ap.IsChildOf(transform);
-            if (!sameHero)
-            {
-                yield break;
-            }
-
-            _turn.NotifyClawGunReleased();
         }
 
         private void LateUpdate()
@@ -457,6 +360,7 @@ namespace WormCrawlerPrototype
             {
                 if (_weaponPivotT != null) _weaponPivotT.gameObject.SetActive(false);
                 if (_aimLine != null) _aimLine.enabled = false;
+                if (_fancyAimLine != null) _fancyAimLine.UpdateLine(false, Vector2.zero, Vector2.zero);
                 _wasEnabled = Enabled;
                 return;
             }
@@ -474,11 +378,8 @@ namespace WormCrawlerPrototype
             {
                 if (_weaponPivotT != null) _weaponPivotT.gameObject.SetActive(false);
                 if (_aimLine != null) _aimLine.enabled = false;
+                if (_fancyAimLine != null) _fancyAimLine.UpdateLine(false, Vector2.zero, Vector2.zero);
                 _held = false;
-                _keyboardHoldActive = false;
-                _mouseHoldActive = false;
-                _externalHoldActive = false;
-                _prevAnyHold = false;
                 return;
             }
 
@@ -530,23 +431,7 @@ namespace WormCrawlerPrototype
 
         private void UpdateAimLine()
         {
-            if (_aimLine == null)
-            {
-                return;
-            }
-
-            if (!showAimLine)
-            {
-                _aimLine.enabled = false;
-                return;
-            }
-
-            if (!Enabled)
-            {
-                _aimLine.enabled = false;
-                return;
-            }
-
+            // Compute aim line geometry regardless of which visual is used.
             var origin = (Vector2)transform.position;
             if (_weaponPivotT != null)
             {
@@ -574,6 +459,40 @@ namespace WormCrawlerPrototype
                 {
                     end = hit.point;
                 }
+            }
+
+            AimLineOrigin = origin;
+            AimLineEnd = end;
+            AimLineDirection = dir;
+            AimLineActive = Enabled;
+
+            // --- Fancy aim line visual ---
+            if (useFancyAimLine)
+            {
+                if (_aimLine != null) _aimLine.enabled = false;
+
+                if (_fancyAimLine == null)
+                {
+                    var go = new GameObject("ClawGunFancyAimLine");
+                    go.transform.SetParent(transform, false);
+                    _fancyAimLine = go.AddComponent<AimLineVisual2D>();
+                }
+                _fancyAimLine.UpdateLine(Enabled, origin, end);
+                return;
+            }
+
+            // --- Legacy plain aim line ---
+            if (_fancyAimLine != null)
+            {
+                _fancyAimLine.UpdateLine(false, origin, end);
+            }
+
+            if (_aimLine == null) return;
+
+            if (!showAimLine || !Enabled)
+            {
+                _aimLine.enabled = false;
+                return;
             }
 
             _aimLine.enabled = true;
@@ -612,13 +531,24 @@ namespace WormCrawlerPrototype
 
         private void UpdateAutoFire()
         {
-            // Human continuous fire (keyboard/mouse) requires InputEnabled.
-            // External hold (AI bots, touch/UI) works regardless of InputEnabled.
+            // Human continuous fire:
+            // - Keyboard: Space
+            // - Mouse: Left button ("hard" button)
+            // - Touch/UI: should call SetExternalHeld(true/false)
+            // We must not clear holds coming from other sources.
             if (Enabled && InputEnabled)
             {
                 if (Keyboard.current != null && Keyboard.current.spaceKey != null)
                 {
-                    _keyboardHoldActive = Keyboard.current.spaceKey.isPressed;
+                    var pressed = Keyboard.current.spaceKey.isPressed;
+                    if (pressed)
+                    {
+                        _keyboardHoldActive = true;
+                    }
+                    else
+                    {
+                        _keyboardHoldActive = false;
+                    }
                 }
                 else
                 {
@@ -627,29 +557,27 @@ namespace WormCrawlerPrototype
 
                 if (Mouse.current != null && Mouse.current.leftButton != null)
                 {
-                    _mouseHoldActive = Mouse.current.leftButton.isPressed;
+                    var pressed = Mouse.current.leftButton.isPressed;
+                    if (pressed)
+                    {
+                        _mouseHoldActive = true;
+                    }
+                    else
+                    {
+                        _mouseHoldActive = false;
+                    }
                 }
                 else
                 {
                     _mouseHoldActive = false;
                 }
-            }
-            else
-            {
-                _keyboardHoldActive = false;
-                _mouseHoldActive = false;
-            }
 
-            if (Enabled)
-            {
                 var anyHold = _externalHoldActive || _keyboardHoldActive || _mouseHoldActive;
 
                 // Rising edge: treat as a new press so firing starts immediately.
                 if (anyHold && !_prevAnyHold)
                 {
-                    CancelPendingClawReleaseNotify();
                     _firedSincePress = false;
-                    _holdStartedAt = Time.time;
                     _nextShotTime = Mathf.Min(_nextShotTime, Time.time);
                 }
 
@@ -667,7 +595,7 @@ namespace WormCrawlerPrototype
 
                     if (_turn != null && _firedSincePress)
                     {
-                        NotifyClawGunReleasedWithDelay();
+                        _turn.NotifyClawGunReleased();
                     }
                 }
 
@@ -676,6 +604,9 @@ namespace WormCrawlerPrototype
             }
             else
             {
+                _keyboardHoldActive = false;
+                _mouseHoldActive = false;
+                _externalHoldActive = false;
                 _prevAnyHold = false;
             }
 
@@ -693,7 +624,7 @@ namespace WormCrawlerPrototype
 #endif
             }
 
-            if (_turn != null && !_firedSincePress && !_turn.CanSelectWeapon(TurnManager.TurnWeapon.ClawGun))
+            if (_turn != null && !_turn.CanSelectWeapon(TurnManager.TurnWeapon.ClawGun))
             {
                 if (debugLogs) Debug.Log($"[ClawGun] AutoFire stopped: CanSelectWeapon=false ({name})");
                 _held = false;
@@ -1104,14 +1035,6 @@ namespace WormCrawlerPrototype
                     _disableAfterShot = false;
                     Enabled = false;
 
-                    // Reset hold state so the next activation can start a fresh burst.
-                    _held = false;
-                    _keyboardHoldActive = false;
-                    _mouseHoldActive = false;
-                    _externalHoldActive = false;
-                    _prevAnyHold = false;
-                    _firedSincePress = false;
-
                     var carousel = GetComponent<HeroAmmoCarousel>();
                     if (carousel != null)
                     {
@@ -1203,17 +1126,16 @@ namespace WormCrawlerPrototype
 
             var pos = _pendingImpactPoint;
             var heroH = Mathf.Max(0.25f, _pendingHeroHeight);
-            var damageRadius = Mathf.Max(0.05f, heroH * Mathf.Max(0.01f, bulletExplosionRadiusHeroHeights));
-            var craterRadius = Mathf.Max(0.05f, heroH * Mathf.Max(0.01f, bulletCraterRadiusHeroHeights));
+            var radius = Mathf.Max(0.05f, heroH * Mathf.Max(0.01f, bulletExplosionRadiusHeroHeights));
 
             if (debugLogs)
             {
-                Debug.Log($"[ClawGun] ApplyPendingImpact: pos={pos} dmgR={damageRadius:0.00} craterR={craterRadius:0.00} hit={(_pendingImpactCollider != null ? _pendingImpactCollider.name : "(null)")} ({name})");
+                Debug.Log($"[ClawGun] ApplyPendingImpact: pos={pos} radius={radius:0.00} hit={(_pendingImpactCollider != null ? _pendingImpactCollider.name : "(null)")} ({name})");
             }
 
-            SpawnSmallExplosionFx(pos, damageRadius);
-            ApplyDirectHitDamage(pos, damageRadius);
-            TryCarveSmallCrater(pos, craterRadius);
+            SpawnSmallExplosionFx(pos, radius);
+            ApplyDirectHitDamage(pos, radius);
+            TryCarveSmallCrater(pos, radius);
 
             _pendingHasImpact = false;
         }
