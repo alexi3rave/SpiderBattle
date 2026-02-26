@@ -8,9 +8,11 @@ namespace WormCrawlerPrototype
         [Header("State")]
         public bool Enabled = false;
 
-        [SerializeField] private bool usedThisMatch = false;
+        [SerializeField] private int maxTeleportCharges = 3;
+        [SerializeField] private int _teleportChargesRemaining = 3;
 
-        public bool CanUseNow => !usedThisMatch;
+        public bool CanUseNow => _teleportChargesRemaining > 0;
+        public int ChargesRemaining => _teleportChargesRemaining;
 
         private Rigidbody2D _rb;
         private Collider2D _heroCol;
@@ -32,7 +34,7 @@ namespace WormCrawlerPrototype
 
         public void ResetMatchUsage()
         {
-            usedThisMatch = false;
+            _teleportChargesRemaining = Mathf.Max(1, maxTeleportCharges);
         }
 
         public bool TryTeleportNow()
@@ -62,7 +64,7 @@ namespace WormCrawlerPrototype
                 return false;
             }
 
-            if (usedThisMatch)
+            if (_teleportChargesRemaining <= 0)
             {
                 Enabled = false;
                 _confirmOpen = false;
@@ -107,7 +109,7 @@ namespace WormCrawlerPrototype
 
             ApplyTeleport(target);
 
-            usedThisMatch = true;
+            _teleportChargesRemaining = Mathf.Max(0, _teleportChargesRemaining - 1);
             _didTeleportThisEnable = true;
             _confirmOpen = false;
             Enabled = false;
@@ -196,7 +198,7 @@ namespace WormCrawlerPrototype
                 _animTime = 0f;
                 return;
             }
-            if (usedThisMatch)
+            if (_teleportChargesRemaining <= 0)
             {
                 return;
             }

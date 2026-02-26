@@ -21,6 +21,23 @@ namespace WormCrawlerPrototype
         [SerializeField] private string teleportIconResourcesPath = "Icons/Teleport";
         [SerializeField] private string clawGunSpritesheetResourcesPath = "Weapons/claw_gun";
         [SerializeField] private int clawGunFrameCount = 9;
+        [Header("HUD Icon Layout")]
+        [SerializeField] private float hudIconBaseSizePx = 44f;
+        [SerializeField] private float hudIconScale = 1.5f;
+        [SerializeField] private float hudIconBaseGapPx = 14f;
+        [SerializeField] private bool useManualHudIconPositionPx = false;
+        [SerializeField] private float hudIconStartXPx = 0f;
+        [SerializeField] private float hudIconStartYPx = 0f;
+        [SerializeField] private float hudIconTopMarginPx = 10f;
+
+        private static bool _sharedHudLayoutInitialized;
+        private static float _sharedHudIconBaseSizePx;
+        private static float _sharedHudIconScale;
+        private static float _sharedHudIconBaseGapPx;
+        private static bool _sharedUseManualHudIconPositionPx;
+        private static float _sharedHudIconStartXPx;
+        private static float _sharedHudIconStartYPx;
+        private static float _sharedHudIconTopMarginPx;
 
         private Texture2D _grenadeIcon;
         private Texture2D _ropeIcon;
@@ -41,6 +58,8 @@ namespace WormCrawlerPrototype
 
         private void Awake()
         {
+            PushLayoutSettingsToShared();
+
             _grapple = GetComponent<GrappleController>();
             _grenade = GetComponent<HeroGrenadeThrower>();
             _clawGun = GetComponent<HeroClawGun>();
@@ -80,6 +99,66 @@ namespace WormCrawlerPrototype
             ApplySelection();
         }
 
+        private void OnValidate()
+        {
+            PushLayoutSettingsToShared();
+        }
+
+        private void PushLayoutSettingsToShared()
+        {
+            _sharedHudIconBaseSizePx = hudIconBaseSizePx;
+            _sharedHudIconScale = hudIconScale;
+            _sharedHudIconBaseGapPx = hudIconBaseGapPx;
+            _sharedUseManualHudIconPositionPx = useManualHudIconPositionPx;
+            _sharedHudIconStartXPx = hudIconStartXPx;
+            _sharedHudIconStartYPx = hudIconStartYPx;
+            _sharedHudIconTopMarginPx = hudIconTopMarginPx;
+            _sharedHudLayoutInitialized = true;
+        }
+
+        private void EnsureSharedLayoutInitialized()
+        {
+            if (_sharedHudLayoutInitialized)
+            {
+                return;
+            }
+
+            PushLayoutSettingsToShared();
+        }
+
+        public static bool TryGetSharedHudIconLayout(out float iconSize, out float y0)
+        {
+            var baseSize = _sharedHudLayoutInitialized ? _sharedHudIconBaseSizePx : 44f;
+            var scaleMul = _sharedHudLayoutInitialized ? _sharedHudIconScale : 1.5f;
+            var baseGap = _sharedHudLayoutInitialized ? _sharedHudIconBaseGapPx : 14f;
+
+            var userScale = Mathf.Clamp(Bootstrap.UserIconScale, 1f, 2.5f);
+            iconSize = Mathf.Max(8f, baseSize) * Mathf.Max(0.1f, scaleMul) * userScale;
+            var gap = Mathf.Max(0f, baseGap) * Mathf.Max(0.1f, scaleMul) * userScale;
+
+            var pad = 10f;
+            var availableW = Mathf.Max(0f, Screen.width - pad * 2f);
+            var baseTotalW = iconSize * 4f + gap * 3f;
+            var fitScale = baseTotalW > 0.01f ? Mathf.Clamp01(availableW / baseTotalW) : 1f;
+            if (fitScale < 1f)
+            {
+                iconSize *= fitScale;
+                gap *= fitScale;
+            }
+
+            if (_sharedHudLayoutInitialized && _sharedUseManualHudIconPositionPx)
+            {
+                y0 = _sharedHudIconStartYPx;
+            }
+            else
+            {
+                var topMargin = _sharedHudLayoutInitialized ? _sharedHudIconTopMarginPx : 10f;
+                y0 = Mathf.Max(0f, topMargin);
+            }
+
+            return true;
+        }
+
         private void OnDestroy()
         {
         }
@@ -114,6 +193,64 @@ namespace WormCrawlerPrototype
             else if (Keyboard.current.digit4Key.wasPressedThisFrame || Keyboard.current.numpad4Key.wasPressedThisFrame)
             {
                 _selected = CoerceSelection(AmmoSlot.Teleport);
+                ApplySelection();
+            }
+        }
+
+        private void DrawTeleportHudIconButton(Rect rect, AmmoSlot slot)
+        {
+            var canSelect = CoerceSelection(slot) == slot;
+            var selected = _selected == slot;
+
+            var prevEnabled = GUI.enabled;
+            GUI.enabled = canSelect;
+
+            var prev = GUI.color;
+            GUI.color = selected ? new Color(1f, 1f, 1f, 1f) : new Color(1f, 1f, 1f, canSelect ? 0.60f : 0.25f);
+
+            var clicked = GUI.Button(rect, GUIContent.none, GUIStyle.none);
+            if (_teleportIcon != null)
+            {
+                GUI.DrawTexture(rect, _teleportIcon, ScaleMode.ScaleToFit, alphaBlend: true);
+            }
+            else
+            {
+                GUI.Label(rect, "T");
+            }
+
+            if (_teleport != null)
+            {
+                var charges = Mathf.Max(0, _teleport.ChargesRemaining);
+                var fontSize = Mathf.Clamp(Mathf.RoundToInt(rect.height * 0.28f), 12, 24);
+                var labelH = fontSize * 1.3f;
+                var labelW = rect.width * 0.55f;
+                var labelRect = new Rect(rect.xMax - labelW - 2f, rect.y + 2f, labelW, labelH);
+
+                var style = new GUIStyle(GUI.skin.label);
+                style.alignment = TextAnchor.UpperRight;
+                style.fontStyle = FontStyle.Bold;
+                style.fontSize = fontSize;
+
+                var text = charges.ToString();
+                var shadow = new Color(0f, 0f, 0f, 0.90f);
+                var main = selected ? new Color(1f, 1f, 0.3f, 1f) : new Color(1f, 1f, 0.3f, canSelect ? 0.90f : 0.45f);
+
+                var prevColor2 = GUI.color;
+                GUI.color = shadow;
+                GUI.Label(new Rect(labelRect.x + 1f, labelRect.y + 1f, labelRect.width, labelRect.height), text, style);
+                GUI.color = main;
+                GUI.Label(labelRect, text, style);
+                GUI.color = prevColor2;
+            }
+
+            DrawIconBorder(rect, selected, canSelect);
+
+            GUI.color = prev;
+            GUI.enabled = prevEnabled;
+
+            if (clicked)
+            {
+                _selected = CoerceSelection(slot);
                 ApplySelection();
             }
         }
@@ -178,7 +315,7 @@ namespace WormCrawlerPrototype
 
             if (_aim != null)
             {
-                _aim.SetAimClampEnabled(clawSelected, 60f);
+                _aim.SetAimClampEnabled(clawSelected, 180f);
                 _aim.ShowReticle = !clawSelected;
             }
 
@@ -250,18 +387,13 @@ namespace WormCrawlerPrototype
                 return;
             }
 
-            // Align with the top HUD row (TurnManager).
-            var hudFont = Mathf.Clamp(Mathf.RoundToInt(Screen.height * 0.032f), 18, 44);
-            var hudH = Mathf.Max(28f, hudFont * 1.35f);
-            var pad = Mathf.Max(10f, hudFont * 0.4f);
+            EnsureSharedLayoutInitialized();
 
-            var iconSize = 44f * 3f;
-            var gap = 14f * 3f;
+            TryGetSharedHudIconLayout(out var iconSize, out var y0);
+            var gap = Mathf.Max(0f, _sharedHudIconBaseGapPx) * Mathf.Max(0.1f, _sharedHudIconScale);
 
-            var leftRect = new Rect(pad, pad, Screen.width * 0.33f, hudH);
-            var rightRect = new Rect(Screen.width - pad - Screen.width * 0.33f, pad, Screen.width * 0.33f, hudH);
-
-            var availableW = Mathf.Max(0f, rightRect.xMin - leftRect.xMax);
+            var pad = 10f;
+            var availableW = Mathf.Max(0f, Screen.width - pad * 2f);
             var baseTotalW = iconSize * 4f + gap * 3f;
             var scale = baseTotalW > 0.01f ? Mathf.Clamp01(availableW / baseTotalW) : 1f;
             if (scale < 1f)
@@ -271,8 +403,7 @@ namespace WormCrawlerPrototype
             }
 
             var totalW = iconSize * 4f + gap * 3f;
-            var x0 = leftRect.xMax + (availableW - totalW) * 0.5f;
-            var y0 = pad + (hudH - iconSize) * 0.5f;
+            var x0 = _sharedUseManualHudIconPositionPx ? _sharedHudIconStartXPx : (Screen.width - totalW) * 0.5f;
 
             var ropeRect = new Rect(x0, y0, iconSize, iconSize);
             var grenadeRect = new Rect(x0 + (iconSize + gap) * 1f, y0, iconSize, iconSize);
@@ -282,7 +413,7 @@ namespace WormCrawlerPrototype
             DrawHudIconButton(ropeRect, _ropeIcon, AmmoSlot.Rope);
             DrawGrenadeHudIconButton(grenadeRect, AmmoSlot.Grenade);
             DrawClawGunHudIconButton(clawRect, AmmoSlot.ClawGun);
-            DrawHudIconButton(tpRect, _teleportIcon, AmmoSlot.Teleport);
+            DrawTeleportHudIconButton(tpRect, AmmoSlot.Teleport);
         }
 
         private void DrawIconBorder(Rect rect, bool selected, bool canSelect)

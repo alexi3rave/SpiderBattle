@@ -41,16 +41,27 @@ namespace WormCrawlerPrototype
         [SerializeField] private bool forceMobileUi;
         [SerializeField] private bool showTouchControlsOnDesktop = true;
         [SerializeField] private Vector2 mobileVirtualResolution = new Vector2(1080f, 1920f);
+        [SerializeField] private float menuSwipeEdgeWidthPx = 84f;
+        [SerializeField] private float menuSwipeMinDistancePx = 150f;
+        [SerializeField] private float menuSwipeMaxDurationSeconds = 0.45f;
         [SerializeField] private float mobileButtonAlpha = 0.35f;
         [SerializeField] private float mobileButtonAlphaPressed = 0.6f;
-        [SerializeField] private float menuUiScale = 2.5f;
+        [SerializeField] private float menuUiScale = 3.75f;
         [SerializeField] private float menuUiScaleFactor = 0.75f;
+        [SerializeField] private float mobileMenuScaleMultiplier = 1.35f;
+        [SerializeField] private float mobileTouchControlsScaleMultiplier = 1.35f;
+        [SerializeField] private float cameraToggleButtonSizePx = 72f;
+        [SerializeField] private float cameraToggleButtonMarginPx = 16f;
         [SerializeField] private float touchFireXOffset = -1000f;
         [SerializeField] private float touchDpadXOffset = 1000f;
         [SerializeField] private bool logTouchLayout;
         [SerializeField] private string loadingPictureResourcesPath = "loadPicture";
         [SerializeField] private float startupLoadingMinSeconds = 2f;
         [SerializeField] private float loadingMinSeconds = 2f;
+        [Header("Startup Intro")]
+        [SerializeField] private bool enableStartupIntro = true;
+        [SerializeField] private float startupIntroDurationSeconds = 5.6f;
+        [SerializeField] private string startupIntroAudioResourcesPath = "intro";
 
         private GUIStyle _mobileButtonStyle;
         private GUIStyle _mobileButtonPressedStyle;
@@ -59,10 +70,23 @@ namespace WormCrawlerPrototype
         private Texture2D _touchCirclePressedTex;
         private Texture2D _touchCircleRingTex;
         private Texture2D _touchCircleRingFireTex;
+        private Texture2D _cameraIconTex;
         private Texture2D _loadingPictureTex;
 
         private bool _showLoadingSplash;
         private float _loadingHideAtRealtime;
+        private bool _startupIntroActive;
+        private float _startupIntroEndRealtime;
+        private AudioSource _startupIntroAudioSource;
+        private AudioClip _startupIntroAudioClip;
+
+        private bool _countdownActive;
+        private float _countdownStartRealtime;
+        private const float CountdownDuration = 5f;
+        private float _countdownPanoOrthoSize;
+        private Vector3 _countdownPanoCenter;
+        private Vector3 _countdownHeroTarget;
+        private float _countdownHeroOrthoSize;
 
         private string _selectedTerrain;
 
@@ -74,7 +98,14 @@ namespace WormCrawlerPrototype
             SetupDifficulty = 3,
             SetupTeamSize = 4,
             Records = 5,
+            Settings = 6,
         }
+
+        private const string IconScalePrefKey = "WormCrawler_IconScale";
+        private const string ControlScalePrefKey = "WormCrawler_ControlScale";
+        public static float UserIconScale { get; private set; } = 1f;
+        public static float UserControlScale { get; private set; } = 1f;
+        private bool _matchInProgress;
 
         private bool _showMainMenu;
         private MenuScreen _screen;
@@ -108,6 +139,11 @@ namespace WormCrawlerPrototype
         private bool _isDragging;
         private Vector2 _dragStartMouse;
         private Vector3 _dragStartCamPos;
+
+        private bool _touchPanActive;
+        private Vector2 _touchPanPrevPos;
+        private bool _touchPinchActive;
+        private float _touchPinchPrevDist;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Init()
@@ -185,8 +221,10 @@ namespace WormCrawlerPrototype
             SelectedTeamSize = Mathf.Clamp(PlayerPrefs.GetInt(TeamSizePrefKey, 3), 1, 5);
             VsCpu = PlayerPrefs.GetInt(VsCpuPrefKey, 0) != 0;
             CpuDifficulty = (WormCrawlerPrototype.AI.BotDifficulty)Mathf.Clamp(PlayerPrefs.GetInt(CpuDifficultyPrefKey, 1), 0, 2);
+            UserIconScale = PlayerPrefs.GetFloat(IconScalePrefKey, 1f);
+            UserControlScale = PlayerPrefs.GetFloat(ControlScalePrefKey, 1f);
             RefreshMapList();
-            BeginLoadingSplash(startupLoadingMinSeconds);
+            BeginStartupIntroSplash();
 
             var s = SceneManager.GetActiveScene();
             Debug.Log($"[Stage1] Bootstrap.Start activeScene='{s.name}' path='{s.path}'");
@@ -222,6 +260,10 @@ namespace WormCrawlerPrototype
         private void OnDestroy()
         {
             SceneManager.sceneLoaded -= OnSceneLoaded;
+            if (_startupIntroAudioSource != null)
+            {
+                _startupIntroAudioSource.Stop();
+            }
         }
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
@@ -244,6 +286,16 @@ namespace WormCrawlerPrototype
             {
                 if (_showMapMenu) HandleMapMenuKeyboard();
                 if (_showMainMenu) HandleMainMenuKeyboard();
+                return;
+            }
+
+            if (IsMobileUiEnabled())
+            {
+                UpdateLeftEdgeMenuSwipe();
+            }
+
+            if (_countdownActive)
+            {
                 return;
             }
 
@@ -334,6 +386,62 @@ namespace WormCrawlerPrototype
                             30f);
                     }
                 }
+
+                // Touch pan (1 finger drag) and pinch-zoom (2 fingers).
+                if (_cam != null && _cam.orthographic)
+                {
+                    var ts = Touchscreen.current;
+                    if (ts != null)
+                    {
+                        var touchCount = 0;
+                        Vector2 t0Pos = default, t1Pos = default;
+                        bool t0Pressed = false, t1Pressed = false;
+                        for (var ti = 0; ti < ts.touches.Count && touchCount < 2; ti++)
+                        {
+                            var tc = ts.touches[ti];
+                            if (tc.press.isPressed)
+                            {
+                                if (touchCount == 0) { t0Pos = tc.position.ReadValue(); t0Pressed = true; }
+                                else { t1Pos = tc.position.ReadValue(); t1Pressed = true; }
+                                touchCount++;
+                            }
+                        }
+
+                        if (touchCount == 2 && t0Pressed && t1Pressed)
+                        {
+                            var curDist = Vector2.Distance(t0Pos, t1Pos);
+                            if (_touchPinchActive)
+                            {
+                                if (_touchPinchPrevDist > 1f && curDist > 1f)
+                                {
+                                    var ratio = _touchPinchPrevDist / curDist;
+                                    var maxOrtho = ComputeMaxCameraOrthoSize();
+                                    _cam.orthographicSize = Mathf.Clamp(_cam.orthographicSize * ratio, 2f, maxOrtho);
+                                }
+                            }
+                            _touchPinchActive = true;
+                            _touchPinchPrevDist = curDist;
+                            _touchPanActive = false;
+                        }
+                        else if (touchCount == 1 && t0Pressed)
+                        {
+                            _touchPinchActive = false;
+                            if (_touchPanActive)
+                            {
+                                var deltaPx = t0Pos - _touchPanPrevPos;
+                                var worldPerPixel = (2f * _cam.orthographicSize) / Mathf.Max(1f, Screen.height);
+                                _cam.transform.position -= new Vector3(deltaPx.x * worldPerPixel, deltaPx.y * worldPerPixel, 0f);
+                            }
+                            _touchPanActive = true;
+                            _touchPanPrevPos = t0Pos;
+                        }
+                        else
+                        {
+                            _touchPinchActive = false;
+                            _touchPanActive = false;
+                        }
+                    }
+                }
             }
 
             if (Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame)
@@ -354,6 +462,16 @@ namespace WormCrawlerPrototype
 
             if (_showLoadingSplash)
             {
+                if (_startupIntroActive)
+                {
+                    DrawIntroSkipButton();
+                }
+                return;
+            }
+
+            if (_countdownActive)
+            {
+                DrawCountdown();
                 return;
             }
 
@@ -377,7 +495,122 @@ namespace WormCrawlerPrototype
 
             if (IsMobileUiEnabled())
             {
+                DrawCameraToggleButton();
+            }
+
+            if (IsMobileUiEnabled())
+            {
                 DrawMobileTouchControls();
+            }
+        }
+
+        private void UpdateLeftEdgeMenuSwipe()
+        {
+            if (_showLoadingSplash || _countdownActive || _showPauseMenu || _showMainMenu || _showMapMenu)
+            {
+                _menuSwipeTracking = false;
+                return;
+            }
+
+            var ts = Touchscreen.current;
+            if (ts == null)
+            {
+                _menuSwipeTracking = false;
+                return;
+            }
+
+            var t = ts.primaryTouch;
+            if (t == null)
+            {
+                _menuSwipeTracking = false;
+                return;
+            }
+
+            var pos = t.position.ReadValue();
+            if (t.press.wasPressedThisFrame)
+            {
+                if (pos.x <= Mathf.Max(8f, menuSwipeEdgeWidthPx))
+                {
+                    _menuSwipeTracking = true;
+                    _menuSwipeStartPos = pos;
+                    _menuSwipeStartTime = Time.unscaledTime;
+                }
+                else
+                {
+                    _menuSwipeTracking = false;
+                }
+                return;
+            }
+
+            if (!_menuSwipeTracking)
+            {
+                return;
+            }
+
+            if (!t.press.isPressed)
+            {
+                _menuSwipeTracking = false;
+                return;
+            }
+
+            var dt = Time.unscaledTime - _menuSwipeStartTime;
+            if (dt > Mathf.Max(0.05f, menuSwipeMaxDurationSeconds))
+            {
+                _menuSwipeTracking = false;
+                return;
+            }
+
+            var delta = pos - _menuSwipeStartPos;
+            var minDist = Mathf.Max(24f, menuSwipeMinDistancePx);
+            if (delta.x >= minDist && Mathf.Abs(delta.y) <= Mathf.Max(48f, delta.x * 0.75f))
+            {
+                _menuSwipeTracking = false;
+                OpenMainMenuFromSwipe();
+            }
+        }
+
+        private void OpenMainMenuFromSwipe()
+        {
+            _showPauseMenu = false;
+            _showMapMenu = false;
+            _showMainMenu = true;
+            _screen = MenuScreen.Main;
+            _mainMenuSelectedIndex = 0;
+            _menuAnimTime = 0f;
+            IsMapMenuOpen = true;
+        }
+
+        private void DrawCameraToggleButton()
+        {
+            var size = Mathf.Clamp(cameraToggleButtonSizePx, 42f, 128f);
+            var y = Mathf.Clamp(cameraToggleButtonMarginPx, 0f, Mathf.Max(0f, Screen.height - size));
+            if (HeroAmmoCarousel.TryGetSharedHudIconLayout(out var iconSize, out var iconRowY))
+            {
+                size = Mathf.Max(24f, iconSize);
+                y = Mathf.Clamp(iconRowY, 0f, Mathf.Max(0f, Screen.height - size));
+            }
+
+            var margin = Mathf.Clamp(cameraToggleButtonMarginPx, 6f, 64f);
+            var rect = new Rect(margin, y, size, size);
+
+            var prev = GUI.color;
+            GUI.color = _followHero ? new Color(1f, 1f, 1f, 0.72f) : new Color(0.4f, 0.85f, 1f, 0.92f);
+            GUI.DrawTexture(rect, Texture2D.whiteTexture);
+            GUI.color = prev;
+
+            var iconPad = size * 0.14f;
+            var iconRect = new Rect(rect.x + iconPad, rect.y + iconPad, rect.width - iconPad * 2f, rect.height - iconPad * 2f);
+            if (_cameraIconTex != null)
+            {
+                var iconColorPrev = GUI.color;
+                GUI.color = _followHero ? new Color(0f, 0f, 0f, 0.92f) : new Color(0f, 0.20f, 0.35f, 1f);
+                GUI.DrawTexture(iconRect, _cameraIconTex, ScaleMode.StretchToFill, alphaBlend: true);
+                GUI.color = iconColorPrev;
+            }
+
+            if (GUI.Button(rect, GUIContent.none, GUIStyle.none))
+            {
+                _followHero = !_followHero;
             }
         }
 
@@ -389,6 +622,16 @@ namespace WormCrawlerPrototype
             return Touchscreen.current != null;
         }
 
+        private float GetMenuUiScale()
+        {
+            var uiScale = Mathf.Max(1f, menuUiScale) * Mathf.Clamp(menuUiScaleFactor, 0.1f, 3f);
+            if (Application.isMobilePlatform || forceMobileUi)
+            {
+                uiScale *= Mathf.Clamp(mobileMenuScaleMultiplier, 0.5f, 3f);
+            }
+            return uiScale;
+        }
+
         private void BeginLoadingSplash(float minSeconds)
         {
             _showLoadingSplash = true;
@@ -396,10 +639,82 @@ namespace WormCrawlerPrototype
             _loadingHideAtRealtime = Mathf.Max(_loadingHideAtRealtime, hideAt);
         }
 
+        private void BeginStartupIntroSplash()
+        {
+            if (!enableStartupIntro)
+            {
+                BeginLoadingSplash(startupLoadingMinSeconds);
+                return;
+            }
+
+            _startupIntroActive = true;
+            _showLoadingSplash = true;
+            var introDuration = Mathf.Max(0.1f, startupIntroDurationSeconds);
+            _startupIntroEndRealtime = Time.realtimeSinceStartup + introDuration;
+            _loadingHideAtRealtime = _startupIntroEndRealtime;
+
+            EnsureStartupIntroAudioSource();
+            if (_startupIntroAudioSource != null)
+            {
+                if (_startupIntroAudioClip == null && !string.IsNullOrEmpty(startupIntroAudioResourcesPath))
+                {
+                    _startupIntroAudioClip = Resources.Load<AudioClip>(startupIntroAudioResourcesPath);
+                }
+
+                if (_startupIntroAudioClip != null)
+                {
+                    _startupIntroAudioSource.clip = _startupIntroAudioClip;
+                    _startupIntroAudioSource.loop = false;
+                    _startupIntroAudioSource.Play();
+                }
+            }
+        }
+
+        private void EnsureStartupIntroAudioSource()
+        {
+            if (_startupIntroAudioSource != null)
+            {
+                return;
+            }
+
+            _startupIntroAudioSource = GetComponent<AudioSource>();
+            if (_startupIntroAudioSource == null)
+            {
+                _startupIntroAudioSource = gameObject.AddComponent<AudioSource>();
+            }
+            _startupIntroAudioSource.playOnAwake = false;
+            _startupIntroAudioSource.spatialBlend = 0f;
+            _startupIntroAudioSource.volume = 1f;
+        }
+
+        private void EndStartupIntroSplash(bool skipped)
+        {
+            _startupIntroActive = false;
+            _showLoadingSplash = false;
+            _loadingHideAtRealtime = Time.realtimeSinceStartup;
+
+            if (_startupIntroAudioSource != null)
+            {
+                if (skipped)
+                {
+                    _startupIntroAudioSource.Stop();
+                }
+            }
+        }
+
         private void UpdateLoadingSplashState()
         {
             if (!_showLoadingSplash)
             {
+                return;
+            }
+
+            if (_startupIntroActive)
+            {
+                if (Time.realtimeSinceStartup >= _startupIntroEndRealtime)
+                {
+                    EndStartupIntroSplash(skipped: false);
+                }
                 return;
             }
 
@@ -441,6 +756,34 @@ namespace WormCrawlerPrototype
             GUI.color = prevColor;
         }
 
+        private void DrawIntroSkipButton()
+        {
+            var elapsed = Mathf.Max(0f, Time.realtimeSinceStartup - (_startupIntroEndRealtime - Mathf.Max(0.1f, startupIntroDurationSeconds)));
+            var blink = 0.55f + 0.45f * Mathf.Abs(Mathf.Sin(elapsed * 4.5f));
+
+            var btnW = Mathf.Clamp(Screen.width * 0.26f, 180f, 360f);
+            var btnH = Mathf.Clamp(Screen.height * 0.08f, 42f, 72f);
+            var x = (Screen.width - btnW) * 0.5f;
+            var y = Screen.height - btnH - Mathf.Clamp(Screen.height * 0.04f, 18f, 48f);
+            var rect = new Rect(x, y, btnW, btnH);
+
+            var prev = GUI.color;
+            GUI.color = new Color(1f, 1f, 1f, 0.25f * blink);
+            GUI.DrawTexture(rect, Texture2D.whiteTexture);
+            GUI.color = prev;
+
+            var style = new GUIStyle(GUI.skin.button);
+            style.fontStyle = FontStyle.Bold;
+            style.fontSize = Mathf.Clamp(Mathf.RoundToInt(btnH * 0.45f), 18, 34);
+
+            var label = "Пропустить";
+            var pressed = GUI.Button(rect, label, style);
+            if (pressed)
+            {
+                EndStartupIntroSplash(skipped: true);
+            }
+        }
+
         private void EnsureMobileGuiStyles()
         {
             if (_mobileButtonStyle != null && _mobileButtonPressedStyle != null)
@@ -475,6 +818,80 @@ namespace WormCrawlerPrototype
             {
                 _touchCircleRingFireTex = GenerateCircleRingTexture(256, new Color(1f, 0.25f, 0.25f, 1f), 12f);
             }
+
+            if (_cameraIconTex == null)
+            {
+                _cameraIconTex = GenerateCameraIconTexture(96);
+            }
+        }
+
+        private static Texture2D GenerateCameraIconTexture(int size)
+        {
+            size = Mathf.Clamp(size, 32, 256);
+            var tex = new Texture2D(size, size, TextureFormat.ARGB32, mipChain: false);
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+
+            var clear = new Color(0f, 0f, 0f, 0f);
+            var white = new Color(1f, 1f, 1f, 1f);
+            for (var y = 0; y < size; y++)
+            {
+                for (var x = 0; x < size; x++)
+                {
+                    tex.SetPixel(x, y, clear);
+                }
+            }
+
+            var bodyX0 = Mathf.RoundToInt(size * 0.13f);
+            var bodyX1 = Mathf.RoundToInt(size * 0.87f);
+            var bodyY0 = Mathf.RoundToInt(size * 0.28f);
+            var bodyY1 = Mathf.RoundToInt(size * 0.78f);
+            for (var y = bodyY0; y <= bodyY1; y++)
+            {
+                for (var x = bodyX0; x <= bodyX1; x++)
+                {
+                    tex.SetPixel(x, y, white);
+                }
+            }
+
+            var topX0 = Mathf.RoundToInt(size * 0.30f);
+            var topX1 = Mathf.RoundToInt(size * 0.56f);
+            var topY0 = Mathf.RoundToInt(size * 0.16f);
+            var topY1 = Mathf.RoundToInt(size * 0.30f);
+            for (var y = topY0; y <= topY1; y++)
+            {
+                for (var x = topX0; x <= topX1; x++)
+                {
+                    tex.SetPixel(x, y, white);
+                }
+            }
+
+            var cx = size * 0.50f;
+            var cy = size * 0.53f;
+            var rOuter = size * 0.20f;
+            var rInner = size * 0.10f;
+            var rOuter2 = rOuter * rOuter;
+            var rInner2 = rInner * rInner;
+            for (var y = bodyY0; y <= bodyY1; y++)
+            {
+                for (var x = bodyX0; x <= bodyX1; x++)
+                {
+                    var dx = x - cx;
+                    var dy = y - cy;
+                    var d2 = dx * dx + dy * dy;
+                    if (d2 <= rOuter2)
+                    {
+                        tex.SetPixel(x, y, clear);
+                    }
+                    if (d2 <= rInner2)
+                    {
+                        tex.SetPixel(x, y, white);
+                    }
+                }
+            }
+
+            tex.Apply(updateMipmaps: false, makeNoLongerReadable: true);
+            return tex;
         }
 
         private static Texture2D GenerateCircleTexture(int size, Color color)
@@ -568,11 +985,15 @@ namespace WormCrawlerPrototype
             var sx = Screen.width / vw;
             var sy = Screen.height / vh;
             var s = Mathf.Min(sx, sy);
+            var touchScale = (Application.isMobilePlatform || forceMobileUi)
+                ? Mathf.Clamp(mobileTouchControlsScaleMultiplier, 0.5f, 3f)
+                : 1f;
 
+            var ctrlScale = Mathf.Clamp(UserControlScale, 0.5f, 1f);
             const float marginPx = 8f;
-            var fireSizePx = 510f * s;
-            var dPadBtnPx = 285f * s;
-            var dPadGapPx = 81f * s;
+            var fireSizePx = 510f * s * touchScale * ctrlScale;
+            var dPadBtnPx = 285f * s * touchScale * ctrlScale;
+            var dPadGapPx = 81f * s * touchScale * ctrlScale;
 
             var hudFont = Mathf.Clamp(Mathf.RoundToInt(Screen.height * 0.032f), 18, 44);
             var hudPad = Mathf.Max(10f, hudFont * 0.4f);
@@ -628,7 +1049,11 @@ namespace WormCrawlerPrototype
         {
             var colPrev = GUI.color;
 
-            var pressedNow = repeat ? GUI.RepeatButton(r, GUIContent.none, GUIStyle.none) : GUI.Button(r, GUIContent.none, GUIStyle.none);
+            // Use touch-based detection for multitouch support instead of GUI.RepeatButton
+            // which only tracks a single touch.
+            var touchHeld = IsTouchInsideRect(r);
+            var guiPressed = repeat ? GUI.RepeatButton(r, GUIContent.none, GUIStyle.none) : GUI.Button(r, GUIContent.none, GUIStyle.none);
+            var pressedNow = touchHeld || guiPressed;
             var isPressed = keyboardPressed || pressedNow;
 
             GUI.color = new Color(1f, 1f, 1f, isPressed ? mobileButtonAlphaPressed : mobileButtonAlpha);
@@ -731,6 +1156,9 @@ namespace WormCrawlerPrototype
         private bool _mobileAimOverrideActive;
         private int _mobileAimOverridePlayerInstanceId;
         private int _mobileAimFacingSign = 1;
+        private bool _menuSwipeTracking;
+        private Vector2 _menuSwipeStartPos;
+        private float _menuSwipeStartTime;
 
         private void ApplyMobileInputs(Transform ap, bool left, bool right, bool up, bool down, bool fire)
         {
@@ -791,20 +1219,73 @@ namespace WormCrawlerPrototype
 
                 if (ropeAttached && !grenadeEnabled)
                 {
-                    // Rope movement mode: do not rotate aim with movement keys.
-                    // Keep only left/right facing updates so the hero does not slide sideways visually.
-                    if (wantFacing)
+                    // Rope movement mode: allow aim rotation with up/down while attached.
+                    if (wantAimAdjust)
                     {
-                        var facingDir = right ? Vector2.right : Vector2.left;
-                        _mobileAimFacingSign = right ? 1 : -1;
-                        aim.SetExternalAimOverride(true, facingDir);
+                        var d = aimDir.sqrMagnitude > 0.0001f ? aimDir.normalized : Vector2.right;
+                        var facingSign = 1f;
+                        if (wantFacing)
+                        {
+                            facingSign = right ? 1f : -1f;
+                        }
+                        else if (Mathf.Abs(d.x) > 0.15f)
+                        {
+                            facingSign = d.x >= 0f ? 1f : -1f;
+                        }
+                        else
+                        {
+                            facingSign = _mobileAimFacingSign;
+                        }
+
+                        var inputV = 0f;
+                        if (up && !down) inputV = 1f;
+                        else if (down && !up) inputV = -1f;
+
+                        var curDeg = Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg;
+                        curDeg = (curDeg % 360f + 360f) % 360f;
+                        var baseDeg = facingSign >= 0f ? 0f : 180f;
+                        var relDeg = Mathf.DeltaAngle(baseDeg, curDeg);
+                        relDeg = Mathf.Clamp(relDeg, -90f, 90f);
+
+                        relDeg += inputV * facingSign * 220f * Time.deltaTime;
+                        relDeg = Mathf.Clamp(relDeg, -90f, 90f);
+
+                        var outRad = (baseDeg + relDeg) * Mathf.Deg2Rad;
+                        var outDir = new Vector2(Mathf.Cos(outRad), Mathf.Sin(outRad));
+                        if (outDir.sqrMagnitude < 0.0001f)
+                        {
+                            outDir = facingSign >= 0f ? Vector2.right : Vector2.left;
+                        }
+
+                        aim.SetExternalAimOverride(true, outDir.normalized);
+                        _mobileAimFacingSign = facingSign >= 0f ? 1 : -1;
                         _mobileAimOverrideActive = true;
-                        aimDir = facingDir;
+                        aimDir = outDir.normalized;
+                    }
+                    else if (wantFacing)
+                    {
+                        // On rope: keep the current relative angle when switching facing side,
+                        // instead of resetting to horizon.
+                        var d = aimDir.sqrMagnitude > 0.0001f ? aimDir.normalized : Vector2.right;
+                        var newFacingSign = right ? 1f : -1f;
+                        var curDeg = Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg;
+                        curDeg = (curDeg % 360f + 360f) % 360f;
+                        var oldBaseDeg = _mobileAimFacingSign >= 0 ? 0f : 180f;
+                        var relDeg = Mathf.Clamp(Mathf.DeltaAngle(oldBaseDeg, curDeg), -90f, 90f);
+
+                        var newBaseDeg = newFacingSign >= 0f ? 0f : 180f;
+                        var outRad = (newBaseDeg + relDeg) * Mathf.Deg2Rad;
+                        var outDir = new Vector2(Mathf.Cos(outRad), Mathf.Sin(outRad));
+                        if (outDir.sqrMagnitude < 0.0001f) outDir = newFacingSign >= 0f ? Vector2.right : Vector2.left;
+
+                        aim.SetExternalAimOverride(true, outDir.normalized);
+                        _mobileAimFacingSign = newFacingSign >= 0f ? 1 : -1;
+                        _mobileAimOverrideActive = true;
+                        aimDir = outDir.normalized;
                     }
                     else if (_mobileAimOverrideActive)
                     {
-                        aim.SetExternalAimOverride(false, Vector2.right);
-                        _mobileAimOverrideActive = false;
+                        // Keep last aim direction while on rope.
                     }
                 }
                 else if (wantAimAdjust)
@@ -992,7 +1473,7 @@ namespace WormCrawlerPrototype
             var sw = (float)Screen.width;
             var sh = (float)Screen.height;
             var mobile = IsMobileUiEnabled();
-            var uiScale = Mathf.Max(1f, menuUiScale) * Mathf.Clamp(menuUiScaleFactor, 0.1f, 3f);
+            var uiScale = GetMenuUiScale();
 
             // Animated entrance.
             var t = Mathf.Clamp01(_menuAnimTime * 3.5f);
@@ -1039,27 +1520,99 @@ namespace WormCrawlerPrototype
                 var mainBtnW = Mathf.Min(panelW - pad * 2f, 320f * uiScale);
                 var mainBtnH = Mathf.Clamp(panelH * 0.13f, 50f, 80f);
                 var mainBtnX = panelRect.x + (panelW - mainBtnW) * 0.5f;
-                var totalH = mainBtnH * 3f + gap * 2f;
+
+                var btnCount = _matchInProgress ? 5 : 4;
+                var totalH = mainBtnH * btnCount + gap * (btnCount - 1);
                 var startY = panelRect.y + (panelH - totalH) * 0.5f + panelH * 0.06f;
+                var row = 0;
 
-                var tex0 = _mainMenuSelectedIndex == 0 ? _menuBtnSelectedTex : _menuBtnNormalTex;
-                var tex1 = _mainMenuSelectedIndex == 1 ? _menuBtnSelectedTex : _menuBtnNormalTex;
-                var tex2 = _mainMenuSelectedIndex == 2 ? _menuBtnSelectedTex : _menuBtnNormalTex;
-
-                if (DrawMenuCartoonButton(new Rect(mainBtnX, startY, mainBtnW, mainBtnH), "New Game", tex0, navBtnFontSize, alpha))
+                if (_matchInProgress)
                 {
-                    _mainMenuSelectedIndex = 0;
+                    var texBack = _mainMenuSelectedIndex == row ? _menuBtnSelectedTex : _menuBtnNavTex;
+                    if (DrawMenuCartoonButton(new Rect(mainBtnX, startY + (mainBtnH + gap) * row, mainBtnW, mainBtnH), "Back", texBack, navBtnFontSize, alpha))
+                    {
+                        _mainMenuSelectedIndex = row;
+                        CloseMainMenu();
+                    }
+                    row++;
+                }
+
+                var tex0 = _mainMenuSelectedIndex == row ? _menuBtnSelectedTex : _menuBtnNormalTex;
+                if (DrawMenuCartoonButton(new Rect(mainBtnX, startY + (mainBtnH + gap) * row, mainBtnW, mainBtnH), "New Game", tex0, navBtnFontSize, alpha))
+                {
+                    _mainMenuSelectedIndex = row;
                     StartSetupWizard();
                 }
-                if (DrawMenuCartoonButton(new Rect(mainBtnX, startY + mainBtnH + gap, mainBtnW, mainBtnH), "Records", tex1, navBtnFontSize, alpha))
+                row++;
+
+                var texSet = _mainMenuSelectedIndex == row ? _menuBtnSelectedTex : _menuBtnNormalTex;
+                if (DrawMenuCartoonButton(new Rect(mainBtnX, startY + (mainBtnH + gap) * row, mainBtnW, mainBtnH), "Settings", texSet, navBtnFontSize, alpha))
                 {
-                    _mainMenuSelectedIndex = 1;
+                    _mainMenuSelectedIndex = row;
+                    _screen = MenuScreen.Settings;
+                }
+                row++;
+
+                var tex1 = _mainMenuSelectedIndex == row ? _menuBtnSelectedTex : _menuBtnNormalTex;
+                if (DrawMenuCartoonButton(new Rect(mainBtnX, startY + (mainBtnH + gap) * row, mainBtnW, mainBtnH), "Records", tex1, navBtnFontSize, alpha))
+                {
+                    _mainMenuSelectedIndex = row;
                     _screen = MenuScreen.Records;
                 }
-                if (DrawMenuCartoonButton(new Rect(mainBtnX, startY + (mainBtnH + gap) * 2f, mainBtnW, mainBtnH), "Exit", tex2, navBtnFontSize, alpha))
+                row++;
+
+                var tex2 = _mainMenuSelectedIndex == row ? _menuBtnSelectedTex : _menuBtnNormalTex;
+                if (DrawMenuCartoonButton(new Rect(mainBtnX, startY + (mainBtnH + gap) * row, mainBtnW, mainBtnH), "Exit", tex2, navBtnFontSize, alpha))
                 {
-                    _mainMenuSelectedIndex = 2;
+                    _mainMenuSelectedIndex = row;
                     ExitGame();
+                }
+
+                GUI.color = prevColor;
+                return;
+            }
+
+            if (_screen == MenuScreen.Settings)
+            {
+                DrawMenuTitle(panelRect, "Settings", alpha, pad);
+
+                var sliderLabelW = Mathf.Min(panelW * 0.40f, 200f);
+                var sliderW = Mathf.Min(panelW - pad * 2f - sliderLabelW - 12f, 400f);
+                var sliderH = Mathf.Clamp(panelH * 0.08f, 36f, 60f);
+                var sliderX = panelRect.x + pad + sliderLabelW + 8f;
+                var sliderLabelX = panelRect.x + pad;
+                var rowH = sliderH * 1.6f;
+                var sY = panelRect.y + panelH * 0.28f;
+
+                var lblStyle = new GUIStyle(GUI.skin.label);
+                lblStyle.fontSize = Mathf.Clamp(Mathf.RoundToInt(panelH * 0.038f), 14, 28);
+                lblStyle.alignment = TextAnchor.MiddleLeft;
+
+                GUI.color = new Color(1f, 1f, 1f, alpha);
+                GUI.Label(new Rect(sliderLabelX, sY, sliderLabelW, sliderH), $"Icons: x{UserIconScale:0.0}", lblStyle);
+                var newIconScale = GUI.HorizontalSlider(new Rect(sliderX, sY + sliderH * 0.3f, sliderW, sliderH * 0.4f), UserIconScale, 1f, 2.5f);
+                newIconScale = Mathf.Round(newIconScale * 10f) / 10f;
+                if (Mathf.Abs(newIconScale - UserIconScale) > 0.01f)
+                {
+                    UserIconScale = newIconScale;
+                    PlayerPrefs.SetFloat(IconScalePrefKey, UserIconScale);
+                    PlayerPrefs.Save();
+                }
+                sY += rowH;
+
+                GUI.Label(new Rect(sliderLabelX, sY, sliderLabelW, sliderH), $"Controls: x{UserControlScale:0.0}", lblStyle);
+                var newCtrlScale = GUI.HorizontalSlider(new Rect(sliderX, sY + sliderH * 0.3f, sliderW, sliderH * 0.4f), UserControlScale, 0.5f, 1f);
+                newCtrlScale = Mathf.Round(newCtrlScale * 10f) / 10f;
+                if (Mathf.Abs(newCtrlScale - UserControlScale) > 0.01f)
+                {
+                    UserControlScale = newCtrlScale;
+                    PlayerPrefs.SetFloat(ControlScalePrefKey, UserControlScale);
+                    PlayerPrefs.Save();
+                }
+
+                if (DrawMenuCartoonButton(new Rect(panelRect.x + pad, navY, navBtnW, navBtnH), "Back", _menuBtnNormalTex, navBtnFontSize, alpha))
+                {
+                    _screen = MenuScreen.Main;
                 }
 
                 GUI.color = prevColor;
@@ -1589,7 +2142,7 @@ namespace WormCrawlerPrototype
 
         private void DrawMapMenu()
         {
-            var uiScale = Mathf.Max(1f, menuUiScale);
+            var uiScale = GetMenuUiScale();
 
             var prevLabelFont = GUI.skin.label.fontSize;
             var prevButtonFont = GUI.skin.button.fontSize;
@@ -1813,7 +2366,7 @@ namespace WormCrawlerPrototype
 
             var sw = (float)Screen.width;
             var sh = (float)Screen.height;
-            var uiScale = Mathf.Max(1f, menuUiScale) * Mathf.Clamp(menuUiScaleFactor, 0.1f, 3f);
+            var uiScale = GetMenuUiScale();
 
             var t = Mathf.Clamp01(_menuAnimTime * 4f);
             var ease = 1f - (1f - t) * (1f - t);
@@ -1908,6 +2461,24 @@ namespace WormCrawlerPrototype
                 }
             }
 
+            if (_countdownActive && _cam != null && _cam.orthographic)
+            {
+                var elapsed = Time.realtimeSinceStartup - _countdownStartRealtime;
+                var t = Mathf.Clamp01(elapsed / CountdownDuration);
+                var ease = t * t * t * (t * (6f * t - 15f) + 10f); // smootherstep
+
+                _cam.orthographicSize = Mathf.Lerp(_countdownPanoOrthoSize, _countdownHeroOrthoSize, ease);
+                _cam.transform.position = Vector3.Lerp(_countdownPanoCenter, _countdownHeroTarget, ease);
+
+                if (elapsed >= CountdownDuration)
+                {
+                    _countdownActive = false;
+                    _cam.orthographicSize = _countdownHeroOrthoSize;
+                    _cam.transform.position = _countdownHeroTarget;
+                }
+                return;
+            }
+
             if (_hero == null || _cam == null) return;
             if (!_followHero) return;
 
@@ -1925,8 +2496,145 @@ namespace WormCrawlerPrototype
             }
         }
 
+        private void DrawCountdown()
+        {
+            var elapsed = Time.realtimeSinceStartup - _countdownStartRealtime;
+            var remaining = Mathf.Max(0f, CountdownDuration - elapsed);
+            var number = Mathf.CeilToInt(remaining);
+            if (number <= 0) number = 1;
+
+            var label = number.ToString();
+            var frac = remaining - Mathf.Floor(remaining);
+            var scale = 1f + 0.3f * frac;
+
+            var sw = (float)Screen.width;
+            var sh = (float)Screen.height;
+
+            var fontSize = Mathf.Clamp(Mathf.RoundToInt(sh * 0.18f * scale), 40, 300);
+            var style = new GUIStyle(GUI.skin.label);
+            style.alignment = TextAnchor.MiddleCenter;
+            style.fontStyle = FontStyle.Bold;
+            style.fontSize = fontSize;
+
+            var w = sw * 0.5f;
+            var h = fontSize * 1.6f;
+            var r = new Rect((sw - w) * 0.5f, (sh - h) * 0.5f, w, h);
+
+            var prevColor = GUI.color;
+
+            // Shadow.
+            GUI.color = new Color(0f, 0f, 0f, 0.7f);
+            GUI.Label(new Rect(r.x + 3f, r.y + 3f, r.width, r.height), label, style);
+
+            // Main.
+            var pulse = 0.85f + 0.15f * Mathf.Sin(elapsed * 8f);
+            GUI.color = new Color(1f, 0.95f * pulse, 0.3f * pulse, 1f);
+            GUI.Label(r, label, style);
+
+            GUI.color = prevColor;
+        }
+
+        private float ComputeMaxCameraOrthoSize()
+        {
+            var gen = _generator;
+            if (gen == null)
+            {
+#if UNITY_6000_0_OR_NEWER
+                gen = FindFirstObjectByType<SimpleWorldGenerator>();
+#else
+                gen = FindObjectOfType<SimpleWorldGenerator>();
+#endif
+            }
+
+            if (gen != null)
+            {
+                var b = ComputeWorldBounds(gen.gameObject);
+                var aspect = Mathf.Max(0.01f, (float)Screen.width / Mathf.Max(1f, Screen.height));
+                var orthoFromHeight = b.extents.y + 2f;
+                var orthoFromWidth = (b.extents.x + 2f) / aspect;
+                return Mathf.Max(orthoFromHeight, orthoFromWidth);
+            }
+
+            return 30f;
+        }
+
+        private static Bounds ComputeWorldBounds(GameObject worldGO)
+        {
+            var colliders = worldGO.GetComponentsInChildren<Collider2D>(true);
+            var hasColliderBounds = false;
+            var bounds = new Bounds(worldGO.transform.position, Vector3.one);
+
+            if (colliders != null)
+            {
+                for (var i = 0; i < colliders.Length; i++)
+                {
+                    var c = colliders[i];
+                    if (c == null || !c.enabled || c.isTrigger)
+                    {
+                        continue;
+                    }
+
+                    if (!hasColliderBounds)
+                    {
+                        bounds = c.bounds;
+                        hasColliderBounds = true;
+                    }
+                    else
+                    {
+                        bounds.Encapsulate(c.bounds);
+                    }
+                }
+            }
+
+            if (hasColliderBounds)
+            {
+                return bounds;
+            }
+
+            var renderers = worldGO.GetComponentsInChildren<Renderer>(true);
+            if (renderers == null || renderers.Length == 0)
+            {
+                return new Bounds(worldGO.transform.position, Vector3.one * 30f);
+            }
+
+            var foundRenderer = false;
+            var b = new Bounds(worldGO.transform.position, Vector3.one * 30f);
+            for (var i = 0; i < renderers.Length; i++)
+            {
+                var r = renderers[i];
+                if (r == null)
+                {
+                    continue;
+                }
+
+                // Ignore decorative background to frame by real terrain contour.
+                if (r.gameObject.name == "Background")
+                {
+                    continue;
+                }
+
+                if (!foundRenderer)
+                {
+                    b = r.bounds;
+                    foundRenderer = true;
+                }
+                else
+                {
+                    b.Encapsulate(r.bounds);
+                }
+            }
+
+            if (!foundRenderer)
+            {
+                return new Bounds(worldGO.transform.position, Vector3.one * 30f);
+            }
+
+            return b;
+        }
+
         private void GenerateWorld(Scene targetScene)
         {
+            _matchInProgress = true;
             BeginLoadingSplash(loadingMinSeconds);
             var seed = unchecked((int)DateTime.Now.Ticks);
 
@@ -2028,9 +2736,27 @@ namespace WormCrawlerPrototype
                 var p = _hero.position;
                 if (_cam.orthographic)
                 {
-                    _cam.orthographicSize = 15f;
+                    // Start countdown: panoramic overview → zoom to hero.
+                    _countdownHeroOrthoSize = 15f;
+                    _countdownHeroTarget = new Vector3(p.x, p.y, _cam.transform.position.z);
+
+                    // Compute panoramic center from world bounds.
+                    var worldBounds = ComputeWorldBounds(worldGO);
+                    _countdownPanoCenter = new Vector3(worldBounds.center.x, worldBounds.center.y, _cam.transform.position.z);
+                    var aspect = Mathf.Max(0.0001f, _cam.aspect);
+                    var halfHeightByWidth = worldBounds.extents.x / aspect;
+                    _countdownPanoOrthoSize = Mathf.Max(_countdownHeroOrthoSize, worldBounds.extents.y, halfHeightByWidth);
+
+                    _cam.orthographicSize = _countdownPanoOrthoSize;
+                    _cam.transform.position = _countdownPanoCenter;
+
+                    _countdownActive = true;
+                    _countdownStartRealtime = Time.realtimeSinceStartup;
                 }
-                _cam.transform.position = new Vector3(p.x, p.y, _cam.transform.position.z);
+                else
+                {
+                    _cam.transform.position = new Vector3(p.x, p.y, _cam.transform.position.z);
+                }
             }
             else
             {

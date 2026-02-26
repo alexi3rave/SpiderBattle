@@ -29,9 +29,14 @@ namespace WormCrawlerPrototype
         [SerializeField] private float ropeWidthMultiplier = 2.0f;
         [SerializeField] private Color ropeEdgeColor = new Color(0.20f, 0.65f, 1.0f, 0.00f);
         [SerializeField] private Color ropeCoreColor = new Color(0.20f, 0.65f, 1.0f, 0.95f);
+        [SerializeField] private bool useTeamRopePalette = true;
+        [SerializeField] private int redTeamIndex = 1;
+        [SerializeField] private Color redTeamRopeEdgeColor = new Color(0.95f, 0.22f, 0.22f, 0.00f);
+        [SerializeField] private Color redTeamRopeCoreColor = new Color(0.98f, 0.30f, 0.30f, 0.95f);
         [SerializeField] private float ropeCoreWidthFraction = 0.0f;
         [SerializeField] private Material ropeGradientMaterial;
         [SerializeField] private Material ropeAuxMaterial;
+        [SerializeField] private bool forceRopeFallbackMaterialOnThisDevice = false;
 
         [Header("Rope Sparks")]
         [SerializeField] private bool enableRopeSparks = true;
@@ -41,6 +46,7 @@ namespace WormCrawlerPrototype
         [SerializeField] private float sparkAmplitude = 0.10f;
         [SerializeField] private int maxSparks = 8;
         [SerializeField] private Color sparkColor = new Color(0.65f, 0.90f, 1.0f, 0.95f);
+        [SerializeField] private Color redTeamSparkColor = new Color(1.0f, 0.55f, 0.55f, 0.95f);
 
         [Header("Anchor Drop")]
         [SerializeField] private bool enableAnchorDrop = true;
@@ -268,6 +274,10 @@ namespace WormCrawlerPrototype
         private Material _ropeEffectsMaterial;
         private Material _ropeGradientMaterialInstance;
         private Material _sparkFillMaterialInstance;
+        private Color _defaultRopeEdgeColor;
+        private Color _defaultRopeCoreColor;
+        private Color _defaultSparkColor;
+        private bool _defaultRopePaletteCaptured;
         private static readonly int CoreColorId = Shader.PropertyToID("_CoreColor");
         private static readonly int EdgeColorId = Shader.PropertyToID("_EdgeColor");
         private static readonly int CoreWidthFractionId = Shader.PropertyToID("_CoreWidthFraction");
@@ -303,6 +313,41 @@ namespace WormCrawlerPrototype
         private static readonly int IsClimbingHash = Animator.StringToHash("IsClimbing");
         private static readonly int ClimbDirHash = Animator.StringToHash("ClimbDir");
         private static readonly int ShootHash = Animator.StringToHash("Shoot");
+
+        private void CaptureDefaultRopePalette()
+        {
+            if (_defaultRopePaletteCaptured)
+            {
+                return;
+            }
+
+            _defaultRopeEdgeColor = ropeEdgeColor;
+            _defaultRopeCoreColor = ropeCoreColor;
+            _defaultSparkColor = sparkColor;
+            _defaultRopePaletteCaptured = true;
+        }
+
+        private bool ApplyTeamRopePalette()
+        {
+            CaptureDefaultRopePalette();
+            if (!useTeamRopePalette)
+            {
+                return false;
+            }
+
+            var identity = GetComponent<PlayerIdentity>();
+            var useRedPalette = identity != null && identity.TeamIndex == redTeamIndex;
+
+            var nextEdge = useRedPalette ? redTeamRopeEdgeColor : _defaultRopeEdgeColor;
+            var nextCore = useRedPalette ? redTeamRopeCoreColor : _defaultRopeCoreColor;
+            var nextSpark = useRedPalette ? redTeamSparkColor : _defaultSparkColor;
+
+            var changed = ropeEdgeColor != nextEdge || ropeCoreColor != nextCore || sparkColor != nextSpark;
+            ropeEdgeColor = nextEdge;
+            ropeCoreColor = nextCore;
+            sparkColor = nextSpark;
+            return changed;
+        }
 
         private void Awake()
         {
@@ -385,6 +430,8 @@ namespace WormCrawlerPrototype
             {
                 _ropeEffectsMaterial = ropeAuxMaterial != null ? ropeAuxMaterial : line.sharedMaterial;
             }
+
+            ApplyTeamRopePalette();
             EnsureVisuals();
 
             _shoot = new InputAction("Shoot", InputActionType.Button);
@@ -502,6 +549,15 @@ namespace WormCrawlerPrototype
                 shader = Shader.Find("WormCrawler/RopeRadialGradient");
             }
 
+            if (forceRopeFallbackMaterialOnThisDevice)
+            {
+                shader = null;
+            }
+            else if (shader != null && !shader.isSupported)
+            {
+                shader = null;
+            }
+
             if (shader != null)
             {
                 if (_ropeGradientMaterialInstance == null || _ropeGradientMaterialInstance.shader != shader)
@@ -509,19 +565,37 @@ namespace WormCrawlerPrototype
                     _ropeGradientMaterialInstance = ropeGradientMaterial != null ? new Material(ropeGradientMaterial) : new Material(shader);
                 }
 
+                // Check if the instantiated material's shader actually compiled (passCount > 0).
+                if (_ropeGradientMaterialInstance.passCount == 0)
+                {
+                    // Shader compiled but has no passes — treat as unsupported.
+                    shader = null;
+                }
+            }
+
+            if (shader != null)
+            {
                 line.sharedMaterial = _ropeGradientMaterialInstance;
                 _ropeGradientMaterialInstance.SetColor(CoreColorId, ropeCoreColor);
                 _ropeGradientMaterialInstance.SetColor(EdgeColorId, ropeEdgeColor);
                 _ropeGradientMaterialInstance.SetFloat(CoreWidthFractionId, Mathf.Clamp01(ropeCoreWidthFraction));
+                line.startColor = Color.white;
+                line.endColor = Color.white;
             }
             else
             {
+                // Fallback: use default material with vertex colors.
                 if (_ropeEffectsMaterial != null)
                 {
                     line.sharedMaterial = _ropeEffectsMaterial;
                 }
-                line.startColor = ropeEdgeColor;
-                line.endColor = ropeEdgeColor;
+                else
+                {
+                    line.sharedMaterial = null;
+                }
+                var fallback = ropeCoreColor.a > 0.01f ? ropeCoreColor : new Color(ropeCoreColor.r, ropeCoreColor.g, ropeCoreColor.b, 0.95f);
+                line.startColor = fallback;
+                line.endColor = fallback;
             }
 
             EnsureSparkPool(width);
@@ -1207,6 +1281,11 @@ namespace WormCrawlerPrototype
 
         private void StartShot()
         {
+            if (ApplyTeamRopePalette())
+            {
+                EnsureVisuals();
+            }
+
             if (animator != null)
             {
                 animator.SetTrigger(ShootHash);

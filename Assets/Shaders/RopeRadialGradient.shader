@@ -85,4 +85,69 @@ Shader "WormCrawler/RopeRadialGradient"
             ENDHLSL
         }
     }
+
+    // Built-in RP fallback SubShader (CG, no URP dependency)
+    SubShader
+    {
+        Tags
+        {
+            "Queue"="Transparent"
+            "RenderType"="Transparent"
+        }
+
+        Blend SrcAlpha OneMinusSrcAlpha
+        ZWrite Off
+        Cull Off
+
+        Pass
+        {
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            #include "UnityCG.cginc"
+
+            struct appdata
+            {
+                float4 vertex : POSITION;
+                float2 uv : TEXCOORD0;
+                float4 color : COLOR;
+            };
+
+            struct v2f
+            {
+                float4 pos : SV_POSITION;
+                float2 uv : TEXCOORD0;
+                float4 color : COLOR;
+            };
+
+            sampler2D _BaseMap;
+            float4 _BaseMap_ST;
+            float4 _CoreColor;
+            float4 _EdgeColor;
+            float _CoreWidthFraction;
+
+            v2f vert(appdata v)
+            {
+                v2f o;
+                o.pos = UnityObjectToClipPos(v.vertex);
+                o.uv = TRANSFORM_TEX(v.uv, _BaseMap);
+                o.color = v.color;
+                return o;
+            }
+
+            fixed4 frag(v2f i) : SV_Target
+            {
+                half v = saturate(i.uv.y);
+                half radial = abs(v - 0.5) * 2.0;
+                half core = saturate(_CoreWidthFraction);
+                half t = (core >= 0.999) ? 0.0 : smoothstep(core, 1.0, radial);
+                fixed4 grad = lerp(_CoreColor, _EdgeColor, t);
+                fixed4 tex = tex2D(_BaseMap, i.uv);
+                return grad * tex * i.color;
+            }
+            ENDCG
+        }
+    }
+
+    Fallback "Sprites/Default"
 }

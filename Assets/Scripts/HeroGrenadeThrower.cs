@@ -38,7 +38,7 @@ namespace WormCrawlerPrototype
         [SerializeField] private Vector2 iconOffsetAimUpExtraFractionOfHeroHeight = new Vector2(0.04f, 0.12f);
 
         [Header("Throw")]
-        [SerializeField] private float maxRangeFractionOfRope = 0.75f;
+        [SerializeField] private float maxRangeFractionOfRope = 1.50f;
         [SerializeField] private float minUpAimY = 0.00f;
         [SerializeField] private float flightSlowdown = 1.15f;
         [SerializeField] private float maxHeightFractionOfHeroHeight = 2.0f;
@@ -51,8 +51,11 @@ namespace WormCrawlerPrototype
         [SerializeField] private bool showTrajectory = true;
         [SerializeField] private int trajectorySteps = 28;
         [SerializeField] private float trajectoryTimeStep = 0.06f;
-        [SerializeField] private float trajectoryLineWidth = 0.05f;
-        [SerializeField] private Color trajectoryColor = new Color(0.9f, 0.95f, 1f, 0.65f);
+        [SerializeField] private float trajectoryLineWidth = 0.25f;
+        [SerializeField] private Color trajectoryColorStart = new Color(1f, 1f, 1f, 0.55f);
+        [SerializeField] private Color trajectoryColorEnd = new Color(0.55f, 0.82f, 1f, 0.35f);
+        [SerializeField] private float explosionRadiusPreview = 1.5f;
+        [SerializeField] private int explosionCircleSegments = 32;
 
         [Header("Projectile Sprite")]
         [SerializeField] private string grenadeSpriteResourcesPath = "Projectiles/grenade";
@@ -145,6 +148,7 @@ namespace WormCrawlerPrototype
         {
             if (_iconT != null) _iconT.gameObject.SetActive(false);
             if (_traj != null) _traj.enabled = false;
+            if (_explosionCircle != null) _explosionCircle.enabled = false;
         }
 
         private void OnDestroy()
@@ -159,6 +163,7 @@ namespace WormCrawlerPrototype
             {
                 if (_iconT != null) _iconT.gameObject.SetActive(false);
                 if (_traj != null) _traj.enabled = false;
+                if (_explosionCircle != null) _explosionCircle.enabled = false;
                 return;
             }
 
@@ -166,6 +171,7 @@ namespace WormCrawlerPrototype
             {
                 if (_iconT != null) _iconT.gameObject.SetActive(false);
                 if (_traj != null) _traj.enabled = false;
+                if (_explosionCircle != null) _explosionCircle.enabled = false;
                 return;
             }
 
@@ -334,8 +340,8 @@ namespace WormCrawlerPrototype
             _traj.numCapVertices = 4;
             _traj.numCornerVertices = 4;
             _traj.material = new Material(Shader.Find("Sprites/Default"));
-            _traj.startColor = trajectoryColor;
-            _traj.endColor = trajectoryColor;
+            _traj.startColor = trajectoryColorStart;
+            _traj.endColor = trajectoryColorEnd;
             _traj.startWidth = trajectoryLineWidth;
             _traj.endWidth = trajectoryLineWidth;
             _traj.enabled = false;
@@ -460,23 +466,22 @@ namespace WormCrawlerPrototype
         public Vector2 ComputeLaunchVelocityFromAim(Vector2 origin, float heroH, Vector2 aimDir)
         {
             var dir = aimDir;
-
-            if (dir.y < 0f)
-            {
-                dir.y = 0f;
-            }
             if (dir.sqrMagnitude < 0.0001f)
             {
                 dir = Vector2.right;
             }
             dir.Normalize();
 
-            var aimY = Mathf.Clamp01(Mathf.Max(0f, dir.y));
-            if (aimY < minUpAimY)
-            {
-                dir = new Vector2(Mathf.Sign(dir.x) * Mathf.Sqrt(Mathf.Max(0.0f, 1f - minUpAimY * minUpAimY)), minUpAimY);
-                aimY = Mathf.Clamp01(Mathf.Max(0f, dir.y));
-            }
+            // 340° arc: allow all directions except 20° directly behind the hero.
+            // "Behind" means opposite to facing direction.
+            var facingSign = dir.x >= 0f ? 1f : -1f;
+            var angleDeg = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
+            var baseDeg = facingSign >= 0f ? 0f : 180f;
+            var rel = Mathf.DeltaAngle(baseDeg, angleDeg);
+            // Clamp to ±170° from facing (340° total arc, 20° dead zone behind).
+            rel = Mathf.Clamp(rel, -170f, 170f);
+            var clampedRad = (baseDeg + rel) * Mathf.Deg2Rad;
+            dir = new Vector2(Mathf.Cos(clampedRad), Mathf.Sin(clampedRad));
 
             var maxRange = GetMaxRange();
             var baseG = Mathf.Abs(Physics2D.gravity.y) * (_rb != null ? Mathf.Max(0.01f, _rb.gravityScale) : 1f);
@@ -484,20 +489,32 @@ namespace WormCrawlerPrototype
             var g = baseG / (slow * slow);
             g = Mathf.Max(0.01f, g);
 
+            // For downward throws, use a direct velocity approach.
+            var aimUpFraction = Mathf.Clamp01(Mathf.Max(0f, dir.y));
             var maxH = Mathf.Max(0.2f, heroH * Mathf.Max(0.05f, maxHeightFractionOfHeroHeight));
-            var height = Mathf.Lerp(heroH * 0.35f, maxH, aimY);
-            height = Mathf.Max(0.05f, height);
 
-            var rangeFactor = 1f - Mathf.Clamp01(aimY);
-            var minRangeF = Mathf.Clamp01(minRangeFractionWhenHigh);
-            var desiredRange = maxRange * Mathf.Lerp(minRangeF, 1f, rangeFactor);
+            if (dir.y >= -0.01f)
+            {
+                // Upward or horizontal throw: parabolic arc.
+                var height = Mathf.Lerp(heroH * 0.35f, maxH, aimUpFraction);
+                height = Mathf.Max(0.05f, height);
 
-            var vy = Mathf.Sqrt(2f * g * height);
-            var time = 2f * vy / g;
-            var vx = desiredRange / Mathf.Max(0.01f, time);
+                var rangeFactor = 1f - aimUpFraction;
+                var minRangeF = Mathf.Clamp01(minRangeFractionWhenHigh);
+                var desiredRange = maxRange * Mathf.Lerp(minRangeF, 1f, rangeFactor);
 
-            var signX = dir.x >= 0f ? 1f : -1f;
-            return new Vector2(vx * signX, vy);
+                var vy = Mathf.Sqrt(2f * g * height);
+                var time = 2f * vy / g;
+                var vx = desiredRange / Mathf.Max(0.01f, time);
+
+                return new Vector2(vx * Mathf.Sign(dir.x), vy);
+            }
+            else
+            {
+                // Downward throw: direct velocity in aim direction.
+                var speed = maxRange * 0.65f;
+                return dir * speed;
+            }
         }
 
         public Vector2 GetThrowOriginWorldPublic(out float heroH, out float heroW)
@@ -572,10 +589,22 @@ namespace WormCrawlerPrototype
             var dt = Mathf.Max(0.01f, trajectoryTimeStep);
 
             _traj.enabled = true;
-            _traj.startColor = trajectoryColor;
-            _traj.endColor = trajectoryColor;
             _traj.startWidth = trajectoryLineWidth;
-            _traj.endWidth = trajectoryLineWidth;
+            _traj.endWidth = trajectoryLineWidth * 0.4f;
+
+            // Gradient: white center -> light blue end.
+            var grad = new Gradient();
+            grad.SetKeys(
+                new GradientColorKey[] {
+                    new GradientColorKey(new Color(trajectoryColorStart.r, trajectoryColorStart.g, trajectoryColorStart.b), 0f),
+                    new GradientColorKey(new Color(trajectoryColorEnd.r, trajectoryColorEnd.g, trajectoryColorEnd.b), 1f)
+                },
+                new GradientAlphaKey[] {
+                    new GradientAlphaKey(trajectoryColorStart.a, 0f),
+                    new GradientAlphaKey(trajectoryColorEnd.a, 1f)
+                }
+            );
+            _traj.colorGradient = grad;
 
             if (_traj.positionCount != steps)
             {
@@ -586,6 +615,9 @@ namespace WormCrawlerPrototype
             var v = v0;
             _traj.SetPosition(0, new Vector3(p.x, p.y, 0f));
 
+            var landingPoint = p;
+            var hitGround = false;
+
             for (var i = 1; i < steps; i++)
             {
                 var next = p + v * dt;
@@ -594,6 +626,8 @@ namespace WormCrawlerPrototype
                 if (TryGroundRaycast(p, next, out var hitPoint))
                 {
                     next = hitPoint;
+                    landingPoint = hitPoint;
+                    hitGround = true;
                     _traj.SetPosition(i, new Vector3(next.x, next.y, 0f));
                     for (var j = i + 1; j < steps; j++)
                     {
@@ -603,7 +637,52 @@ namespace WormCrawlerPrototype
                 }
 
                 p = next;
+                landingPoint = p;
                 _traj.SetPosition(i, new Vector3(p.x, p.y, 0f));
+            }
+
+            // Draw explosion radius projection circle at landing.
+            UpdateExplosionCircle(landingPoint, hitGround);
+        }
+
+        private LineRenderer _explosionCircle;
+
+        private void UpdateExplosionCircle(Vector2 center, bool visible)
+        {
+            if (!visible || explosionRadiusPreview <= 0.01f)
+            {
+                if (_explosionCircle != null) _explosionCircle.enabled = false;
+                return;
+            }
+
+            if (_explosionCircle == null)
+            {
+                var go = new GameObject("GrenadeExplosionPreview");
+                go.transform.SetParent(transform, false);
+                _explosionCircle = go.AddComponent<LineRenderer>();
+                _explosionCircle.useWorldSpace = true;
+                _explosionCircle.alignment = LineAlignment.View;
+                _explosionCircle.loop = true;
+                _explosionCircle.numCapVertices = 0;
+                _explosionCircle.numCornerVertices = 0;
+                _explosionCircle.material = new Material(Shader.Find("Sprites/Default"));
+            }
+
+            var segs = Mathf.Clamp(explosionCircleSegments, 8, 64);
+            _explosionCircle.enabled = true;
+            _explosionCircle.positionCount = segs;
+            _explosionCircle.startWidth = trajectoryLineWidth * 0.5f;
+            _explosionCircle.endWidth = trajectoryLineWidth * 0.5f;
+            var circleColor = new Color(1f, 0.45f, 0.2f, 0.4f);
+            _explosionCircle.startColor = circleColor;
+            _explosionCircle.endColor = circleColor;
+
+            for (var i = 0; i < segs; i++)
+            {
+                var angle = (float)i / segs * 360f * Mathf.Deg2Rad;
+                var px = center.x + Mathf.Cos(angle) * explosionRadiusPreview;
+                var py = center.y + Mathf.Sin(angle) * explosionRadiusPreview;
+                _explosionCircle.SetPosition(i, new Vector3(px, py, 0f));
             }
         }
 

@@ -5,6 +5,12 @@ TextureImporter:
   - first:
       213: 6519758931356258408
     second: "\u0414\u043E\u043D\u0441\u043A\u043E\u0439 \u0411\u0430\u0442\u044F_0"
+  - first:
+      213: -110560580701004419
+    second: "\u0414\u043E\u043D\u0441\u043A\u043E\u0439 \u0411\u0430\u0442\u044F_1"
+  - first:
+      213: 4043528595531019310
+    second: "\u0414\u043E\u043D\u0441\u043A\u043E\u0439 \u0411\u0430\u0442\u044F_2"
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -117,9 +123,9 @@ TextureImporter:
       rect:
         serializedVersion: 2
         x: 0
-        y: 117
+        y: 106
         width: 1536
-        height: 864
+        height: 886
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -130,6 +136,50 @@ TextureImporter:
       bones: []
       spriteID: 8609ba47436da7a50800000000000000
       internalID: 6519758931356258408
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: "\u0414\u043E\u043D\u0441\u043A\u043E\u0439 \u0411\u0430\u0442\u044F_1"
+      rect:
+        serializedVersion: 2
+        x: 592
+        y: 108
+        width: 75
+        height: 25
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: d7dd725dcb5377ef0800000000000000
+      internalID: -110560580701004419
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: "\u0414\u043E\u043D\u0441\u043A\u043E\u0439 \u0411\u0430\u0442\u044F_2"
+      rect:
+        serializedVersion: 2
+        x: 667
+        y: 117
+        width: 11
+        height: 6
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: e24b2c785df7d1830800000000000000
+      internalID: 4043528595531019310
       vertices: []
       indices: 
       edges: []
@@ -149,6 +199,8 @@ TextureImporter:
       entries: []
     nameFileIdTable:
       "\u0414\u043E\u043D\u0441\u043A\u043E\u0439 \u0411\u0430\u0442\u044F_0": 6519758931356258408
+      "\u0414\u043E\u043D\u0441\u043A\u043E\u0439 \u0411\u0430\u0442\u044F_1": -110560580701004419
+      "\u0414\u043E\u043D\u0441\u043A\u043E\u0439 \u0411\u0430\u0442\u044F_2": 4043528595531019310
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

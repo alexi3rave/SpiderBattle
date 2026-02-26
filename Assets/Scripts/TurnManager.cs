@@ -1445,9 +1445,11 @@ namespace WormCrawlerPrototype
                 var pad = Mathf.Max(10f, hudFont * 0.4f);
                 var midGap = Mathf.Max(16f, hudFont * 0.6f);
 
-                var leftRect = new Rect(pad, pad, Screen.width * 0.33f, hudH);
                 var rightRect = new Rect(Screen.width - pad - Screen.width * 0.33f, pad, Screen.width * 0.33f, hudH);
                 var centerRect = new Rect(Screen.width * 0.5f + midGap, pad, Screen.width * 0.5f - pad - midGap, hudH);
+                var rightLineH = hudH;
+                var rightTopRect = new Rect(rightRect.x, pad, rightRect.width, rightLineH);
+                var rightBottomRect = new Rect(rightRect.x, pad + rightLineH * 0.92f, rightRect.width, rightLineH);
 
                 var styleL = new GUIStyle(GUI.skin.label);
                 styleL.fontSize = hudFont;
@@ -1466,29 +1468,26 @@ namespace WormCrawlerPrototype
                 var bgH = Mathf.Clamp(hudH - bgPadY * 2f, 18f, hudH);
                 var bgY = pad + (hudH - bgH) * 0.5f;
 
-                var leftText = $"SPIDER  {_team0Wins}";
-                var rightText = $"RED  {_team1Wins}";
+                var rightTopText = $"RED  {_team1Wins}";
+                var rightBottomText = $"SPIDER  {_team0Wins}";
                 var centerText = $"{apName}   {SecondsLeft}s";
 
-                var leftSize = styleL.CalcSize(new GUIContent(leftText));
-                var rightSize = styleR.CalcSize(new GUIContent(rightText));
+                var rightTopSize = styleR.CalcSize(new GUIContent(rightTopText));
+                var rightBottomSize = styleR.CalcSize(new GUIContent(rightBottomText));
                 var centerSize = styleC.CalcSize(new GUIContent(centerText));
 
-                var leftBgW = Mathf.Min(leftRect.width, leftSize.x + bgPadX * 2f);
-                var rightBgW = Mathf.Min(rightRect.width, rightSize.x + bgPadX * 2f);
+                var rightBgW = Mathf.Min(rightRect.width, Mathf.Max(rightTopSize.x, rightBottomSize.x) + bgPadX * 2f);
                 var centerBgW = Mathf.Min(centerRect.width, centerSize.x + bgPadX * 2f);
 
-                var leftBg = new Rect(leftRect.x, bgY, leftBgW, bgH);
-                var rightBg = new Rect(rightRect.xMax - rightBgW, bgY, rightBgW, bgH);
+                var rightBg = new Rect(rightRect.xMax - rightBgW, rightTopRect.y, rightBgW, rightLineH * 2f - bgPadY);
                 var centerBg = new Rect(centerRect.x, bgY, centerBgW, bgH);
 
-                GUI.Box(leftBg, GUIContent.none);
                 GUI.Box(rightBg, GUIContent.none);
                 GUI.Box(centerBg, GUIContent.none);
                 GUI.color = prevCol;
 
-                GUI.Label(leftRect, leftText, styleL);
-                GUI.Label(rightRect, rightText, styleR);
+                GUI.Label(rightTopRect, rightTopText, styleR);
+                GUI.Label(rightBottomRect, rightBottomText, styleR);
                 GUI.Label(centerRect, centerText, styleC);
             }
 
@@ -1590,24 +1589,122 @@ namespace WormCrawlerPrototype
 
         private void DrawEndRoundMenu()
         {
-            var w = Mathf.Min(420f, Screen.width - 40f);
-            var h = 170f;
-            var x = (Screen.width - w) * 0.5f;
-            var y = (Screen.height - h) * 0.5f;
-            var rect = new Rect(x, y, w, h);
+            var sw = (float)Screen.width;
+            var sh = (float)Screen.height;
 
-            GUI.Box(rect, "Round finished");
+            // Match main menu sizing.
+            var uiScale = Mathf.Max(1f, 3.75f) * Mathf.Clamp(0.75f, 0.1f, 3f);
 
-            var inner = new Rect(rect.x + 12f, rect.y + 34f, rect.width - 24f, rect.height - 46f);
-            GUI.Label(new Rect(inner.x, inner.y, inner.width, 24f), $"Winner: {_winnerName}");
+            var panelW = Mathf.Min(sw * 0.92f, 700f * uiScale);
+            var panelH = Mathf.Min(sh * 0.88f, 600f * uiScale);
+            var panelX = (sw - panelW) * 0.5f;
+            var panelY = (sh - panelH) * 0.5f;
+            var panelRect = new Rect(panelX, panelY, panelW, panelH);
 
-            var btnW = Mathf.Min(220f, inner.width);
-            var bx = inner.x + (inner.width - btnW) * 0.5f;
-            var by = inner.y + 40f;
+            // Dark overlay.
+            var prevColor = GUI.color;
+            GUI.color = new Color(0f, 0f, 0f, 0.55f);
+            GUI.DrawTexture(new Rect(0f, 0f, sw, sh), Texture2D.whiteTexture);
 
-            DrawSelectableButton(new Rect(bx, by, btnW, 34f), "Continue", selected: _endRoundSelectedIndex == 0, onClick: () => ActivateEndRoundSelection(0));
-            by += 44f;
-            DrawSelectableButton(new Rect(bx, by, btnW, 34f), "Exit", selected: _endRoundSelectedIndex == 1, onClick: () => ActivateEndRoundSelection(1));
+            // Panel background.
+            GUI.color = new Color(0.08f, 0.06f, 0.18f, 0.5f);
+            GUI.DrawTexture(panelRect, Texture2D.whiteTexture);
+            GUI.color = prevColor;
+
+            // Border.
+            var borderW = Mathf.Max(3f, panelW * 0.005f);
+            var borderCol = new Color(0.4f, 0.7f, 1f, 0.9f);
+            DrawMenuBorder(panelRect, borderW, borderCol);
+
+            // Title.
+            var pad = Mathf.Max(12f, panelW * 0.03f);
+            var titleFontSize = Mathf.Clamp(Mathf.RoundToInt(panelH * 0.075f), 24, 58);
+            var titleStyle = new GUIStyle(GUI.skin.label);
+            titleStyle.alignment = TextAnchor.MiddleCenter;
+            titleStyle.fontStyle = FontStyle.Bold;
+            titleStyle.fontSize = titleFontSize;
+            titleStyle.wordWrap = true;
+
+            var titleH = titleFontSize * 1.55f;
+            var titleRect = new Rect(panelRect.x + pad, panelRect.y + pad, panelRect.width - pad * 2f, titleH);
+            GUI.color = new Color(1f, 0.98f, 0.86f, 1f);
+            GUI.Label(titleRect, "Round finished", titleStyle);
+
+            // Winner label.
+            var infoFontSize = Mathf.Clamp(Mathf.RoundToInt(panelH * 0.05f), 16, 36);
+            var infoStyle = new GUIStyle(GUI.skin.label);
+            infoStyle.alignment = TextAnchor.MiddleCenter;
+            infoStyle.fontSize = infoFontSize;
+            infoStyle.fontStyle = FontStyle.Bold;
+            GUI.color = new Color(1f, 1f, 0.4f, 1f);
+            var winRect = new Rect(panelRect.x + pad, titleRect.yMax + pad * 0.5f, panelRect.width - pad * 2f, infoFontSize * 2f);
+            GUI.Label(winRect, $"Winner: {_winnerName}", infoStyle);
+
+            // Buttons — same sizing as main menu.
+            var navBtnFontSize = Mathf.Clamp(Mathf.RoundToInt(panelH * 0.055f), 18, 40);
+            var mainBtnW = Mathf.Min(panelW - pad * 2f, 320f * uiScale);
+            var mainBtnH = Mathf.Clamp(panelH * 0.13f, 50f, 80f);
+            var gap = Mathf.Max(12f, panelH * 0.04f);
+            var mainBtnX = panelRect.x + (panelW - mainBtnW) * 0.5f;
+            var totalBtnsH = mainBtnH * 2f + gap;
+            var startY = winRect.yMax + (panelRect.yMax - winRect.yMax - totalBtnsH) * 0.4f;
+
+            GUI.color = Color.white;
+            var tex0 = _endRoundSelectedIndex == 0 ? new Color(0.20f, 0.50f, 0.90f, 0.95f) : new Color(0.14f, 0.12f, 0.28f, 0.92f);
+            var tex1 = _endRoundSelectedIndex == 1 ? new Color(0.20f, 0.50f, 0.90f, 0.95f) : new Color(0.14f, 0.12f, 0.28f, 0.92f);
+
+            if (DrawEndMenuButton(new Rect(mainBtnX, startY, mainBtnW, mainBtnH), "Continue", tex0, navBtnFontSize))
+            {
+                ActivateEndRoundSelection(0);
+            }
+            if (DrawEndMenuButton(new Rect(mainBtnX, startY + mainBtnH + gap, mainBtnW, mainBtnH), "Exit", tex1, navBtnFontSize))
+            {
+                ActivateEndRoundSelection(1);
+            }
+
+            GUI.color = prevColor;
+        }
+
+        private static bool DrawEndMenuButton(Rect rect, string label, Color bgColor, int fontSize)
+        {
+            var prevColor = GUI.color;
+
+            GUI.color = bgColor;
+            GUI.DrawTexture(rect, Texture2D.whiteTexture);
+
+            var bw = Mathf.Max(2f, rect.width * 0.02f);
+            DrawMenuBorder(rect, bw, new Color(1f, 1f, 1f, 0.6f));
+
+            var style = new GUIStyle(GUI.skin.label);
+            style.alignment = TextAnchor.MiddleCenter;
+            style.fontStyle = FontStyle.Bold;
+            style.fontSize = fontSize;
+            style.wordWrap = false;
+            style.clipping = TextClipping.Clip;
+
+            GUI.color = new Color(0f, 0f, 0f, 0.8f);
+            GUI.Label(new Rect(rect.x + 1f, rect.y + 1f, rect.width, rect.height), label, style);
+
+            GUI.color = Color.white;
+            GUI.Label(rect, label, style);
+
+            GUI.color = new Color(1f, 1f, 1f, 0f);
+            var clicked = GUI.Button(rect, GUIContent.none, GUIStyle.none);
+
+            GUI.color = prevColor;
+            return clicked;
+        }
+
+        private static void DrawMenuBorder(Rect rect, float w, Color col)
+        {
+            var prev = GUI.color;
+            GUI.color = col;
+            var tex = Texture2D.whiteTexture;
+            GUI.DrawTexture(new Rect(rect.x, rect.y, rect.width, w), tex);
+            GUI.DrawTexture(new Rect(rect.x, rect.yMax - w, rect.width, w), tex);
+            GUI.DrawTexture(new Rect(rect.x, rect.y, w, rect.height), tex);
+            GUI.DrawTexture(new Rect(rect.xMax - w, rect.y, w, rect.height), tex);
+            GUI.color = prev;
         }
 
         private static void DrawSelectableButton(Rect rect, string label, bool selected, System.Action onClick)
